@@ -70,7 +70,8 @@ test('the pane shows the summary and a checklist of tasks', async ($, on) => {
   for (const label of ['Goal', 'Done when', 'Done', 'Next']) {
     expect(await pane.find({ type: 'Text', text: label })).toBeDefined()
   }
-  expect(await pane.find({ type: 'Text', text: /Every task state, subtasks and folding show correctly/ })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Every task state shows' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: /Goal reached/ })).toBeUndefined()
   // Folded: "Write the README" shows its 0/2 count, not its subtasks.
   expect(await pane.find({ type: 'Text', text: '0/2' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: 'Add screenshots' })).toBeUndefined()

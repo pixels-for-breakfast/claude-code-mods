@@ -145,7 +145,7 @@ const DEMO_TASKS: Task[] = [
 const DEMO_TITLE = 'Session glance demo'
 const DEMO_SUMMARY = [
   'GOAL: Glanceable status and checklist beside the session',
-  'DONE_WHEN: Every task state, subtasks and folding show correctly',
+  'DONE_WHEN: [x] Every task state shows; [ ] Subtasks fold and unfold; [ ] Dragging reorders the list',
   'DONE: Seeded a demo of everything the pane can show',
   'NEXT: Click a task, then try Edit mode and drag one',
 ].join('\n')
@@ -158,17 +158,49 @@ export function splitReply(reply: string): { title: string; summary: string } {
   return match ? { title: (match[1] ?? '').trim().slice(0, 80), summary: (match[2] ?? '').trim() } : { title: '', summary: reply.trim() }
 }
 
-/** Reads `Label: value` lines (any case) into goal / done_when / done / next; prose without labels comes back whole as `goal`. */
+/** Reads `Label: value` lines (any case) into goal / done_when / done / next / drift; prose without labels comes back whole as `goal`. */
 export function parseSummary(text: string): Record<string, string> {
   const fields: Record<string, string> = {}
   for (const line of text.split('\n')) {
-    const match = line.match(/^\s*[-*]?\s*(goal|done[\s_-]*when|done|next)\s*:\s*(.+)$/i)
+    const match = line.match(/^\s*[-*]?\s*(goal|done[\s_-]*when|done|next|drift)\s*:\s*(.+)$/i)
     if (match?.[1] && match[2]) {
       fields[match[1].toLowerCase().replace(/[\s-]+/g, '_')] = match[2].trim()
     }
   }
 
   return Object.keys(fields).length === 0 && text.trim() !== '' ? { goal: text.trim() } : fields
+}
+
+export type Criterion = { text: string; isMet: boolean; isTicked: boolean }
+
+/**
+ * Splits DONE_WHEN into criteria: `[x] met; [ ] open`. A criterion the person ticked stays met
+ * whatever the model says. A line without markers is one open criterion, as older summaries wrote it.
+ */
+export function parseCriteria(doneWhen: string | undefined, tickedKeys: readonly string[]): Criterion[] {
+  if (doneWhen === undefined || doneWhen.trim() === '') {
+    return []
+  }
+
+  return doneWhen
+    .split(';')
+    .map(part => part.trim().match(/^(?:\[([ xX])\]\s*)?(.+)$/))
+    .flatMap(match => {
+      const text = match?.[2]?.trim() ?? ''
+      const isTicked = tickedKeys.includes(text.toLowerCase())
+
+      return text === '' ? [] : [{ text, isMet: isTicked || match?.[1]?.toLowerCase() === 'x', isTicked }]
+    })
+}
+
+/** DONE_WHEN written back from criteria, for the next summary prompt. */
+export function formatCriteria(criteria: readonly Criterion[]): string {
+  return criteria.map(criterion => `[${criterion.isMet ? 'x' : ' '}] ${criterion.text}`).join('; ')
+}
+
+/** The drift line to show, or empty when the turn served the goal. */
+export function driftNote(drift: string | undefined): string {
+  return drift === undefined || /^(none|no|n\/a|-)?\.?$/i.test(drift.trim()) ? '' : drift.trim()
 }
 
 /** What a compaction is told to keep: the goal and its done-when, word for word; empty with neither. */
@@ -180,16 +212,21 @@ export function compactNote(text: string): string {
 }
 
 /** Builds the rolling-summary prompt: the previous status is folded together with the latest exchange. */
-export function summaryPrompt(previous: string, prompt: string, answer: string): string {
+export function summaryPrompt(previous: string, prompt: string, answer: string, tickedKeys: readonly string[] = []): string {
+  const fields = parseSummary(previous)
+  const doneWhen = formatCriteria(parseCriteria(fields.done_when, tickedKeys))
+
   return [
-    'You keep a glanceable status of a coding session. Reply with exactly these five lines and nothing else:',
+    'You keep a glanceable status of a coding session. Reply with exactly these six lines and nothing else:',
     'TITLE: <session title, max 6 words>',
     'GOAL: <what the user is after, max 12 words>',
-    'DONE_WHEN: <checkable criteria that mean the goal is reached, max 15 words>',
+    'DONE_WHEN: <1-4 checkable criteria that mean the goal is reached, max 8 words each, separated by "; ", each starting [x] when met, else [ ]>',
     'DONE: <what was just finished, max 12 words>',
     'NEXT: <the next step or open question, max 12 words>',
+    'DRIFT: <when the latest exchange did not serve GOAL, what happened instead, max 10 words; else none>',
+    'Keep criteria that still apply word for word; a criterion marked [x] in the previous status stays [x]. A new goal gets new criteria.',
     'Terse fragments, no full sentences, no markdown, no repetition between lines.',
-    `<previous_status>${previous ? FIELDS.map(field => `${field.key.toUpperCase()}: ${parseSummary(previous)[field.key] ?? ''}`).join('\n') : '(none yet)'}</previous_status>`,
+    `<previous_status>${previous ? FIELDS.map(field => `${field.key.toUpperCase()}: ${(field.key === 'done_when' ? doneWhen : fields[field.key]) ?? ''}`).join('\n') : '(none yet)'}</previous_status>`,
     `<latest_user_message>${prompt.slice(0, 4000)}</latest_user_message>`,
     `<latest_assistant_reply>${answer.slice(0, 8000)}</latest_assistant_reply>`,
   ].join('\n')
@@ -436,6 +473,19 @@ async function changeStatus($: EngineInterface, task: Task): Promise<void> {
 /** Type and spacing: two steps up the API's five sizes (caption, footnote, body, heading, title), for reading at a glance. */
 const TYPE = { text: 'heading', label: 'body', head: 'title', icon: 24, padX: 'xl', padY: 'lg' } as const
 
+/** Ticks or unticks a done-when criterion by hand and tells the model; a hand tick outlasts the model's own view. */
+async function toggleCriterion($: EngineInterface, criterion: Criterion): Promise<void> {
+  const key = criterion.text.toLowerCase()
+  await update($, ticked, keys => (criterion.isTicked ? keys.filter(one => one !== key) : [...keys, key]))
+  await tellModel(
+    $,
+    criterion.isTicked
+      ? `The user unticked the done-when criterion "${criterion.text}"; judge it again from the work.`
+      : `The user ticked the done-when criterion "${criterion.text}" as met.`,
+  )
+  await save($)
+}
+
 /** Clears everything the pane holds for this session, after the person confirms; true when it did. */
 async function purge($: EngineInterface): Promise<boolean> {
   const answer = await ask($, 'Clear the status, the title and every task in the session pane? This cannot be undone.', ['Clear everything', 'Cancel'])
@@ -447,6 +497,7 @@ async function purge($: EngineInterface): Promise<boolean> {
   await update($, summary, () => '')
   await update($, title, () => '')
   await update($, folded, () => [])
+  await update($, ticked, () => [])
   await update($, draft, () => [])
   await update($, selectedId, () => '')
   await update($, isManaging, () => false)
@@ -495,6 +546,7 @@ export const register: Register = (on, options) => {
       await update($, summary, () => DEMO_SUMMARY)
       await update($, title, () => DEMO_TITLE)
       await update($, folded, () => DEMO_FOLDED)
+      await update($, ticked, () => [])
       await save($)
       await openPane($)
 
@@ -578,8 +630,8 @@ export const register: Register = (on, options) => {
     await update($, isSummarizing, () => true)
     const reply = await $.model.complete({
       model: 'haiku',
-      system: 'Answer only with the five labelled lines asked for: TITLE, GOAL, DONE_WHEN, DONE, NEXT. No other labels, no extra lines.',
-      prompt: summaryPrompt(await read($, summary), await read($, lastPrompt), e.answer),
+      system: 'Answer only with the six labelled lines asked for: TITLE, GOAL, DONE_WHEN, DONE, NEXT, DRIFT. No other labels, no extra lines.',
+      prompt: summaryPrompt(await read($, summary), await read($, lastPrompt), e.answer, await read($, ticked)),
       maxTokens: 300,
     })
     if (reply.isAnswered) {
@@ -680,6 +732,9 @@ export const register: Register = (on, options) => {
     const subtaskAdds = await read($, subtaskCount)
     const foldedIds = await read($, folded)
     const fields = parseSummary(await read($, summary))
+    const criteria = parseCriteria(fields.done_when, await read($, ticked))
+    const isReached = criteria.length > 0 && criteria.every(criterion => criterion.isMet)
+    const drift = driftNote(fields.drift)
     const busy = await read($, isSummarizing)
     const stored = managing ? await read($, draft) : await read($, tasks)
     const rows = displayRows(stored, foldedIds)
@@ -802,9 +857,36 @@ export const register: Register = (on, options) => {
                 <Text size={type.label} color={field.color}>
                   {field.label}
                 </Text>
-                <Text size={type.text}>{fields[field.key]}</Text>
+                {field.key === 'done_when' ? (
+                  <Box flexDirection="column">
+                    {criteria.map(criterion => (
+                      <Box key={`criterion-row-${criterion.text}`} alignItems="center" gap="sm" minWidth={0}>
+                        {Svg ? (
+                          <Svg source={criterion.isMet ? ICON.completed : ICON.pending} alt={criterion.isMet ? 'met' : 'open'} width={type.icon} height={type.icon} />
+                        ) : (
+                          <Text color="inactive">{criterion.isMet ? GLYPH.completed : GLYPH.pending}</Text>
+                        )}
+                        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                          <Button key={`criterion-${criterion.text}`} plain onPress={() => toggleCriterion($, criterion)}>
+                            <Text size={type.text} color={criterion.isMet ? 'inactive' : undefined}>
+                              {criterion.text}
+                            </Text>
+                          </Button>
+                        </Box>
+                      </Box>
+                    ))}
+                    {isReached && (
+                      <Text size={type.text} color="success">
+                        Goal reached: wrap up, or set a new goal.
+                      </Text>
+                    )}
+                  </Box>
+                ) : (
+                  <Text size={type.text}>{fields[field.key]}</Text>
+                )}
               </Box>
             ))}
+          {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
         </Box>
 
         <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
