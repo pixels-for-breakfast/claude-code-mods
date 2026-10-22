@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, suggestionFrom, summaryPrompt } from '../hooks/register'
+import { compactNote, describeChanges, driftNote, formatCriteria, handoffMarkdown, parseCriteria, suggestionFrom, summaryPrompt } from '../hooks/register'
+import { moveTask } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
@@ -87,7 +88,7 @@ test('handoffMarkdown writes the status, done-when and checklist for a PR descri
       '**Done when:**\n- [x] Tests pass\n- [ ] Docs updated',
       '**Done:** Tests',
       '**Next:** Docs',
-      '## Tasks',
+      '## Agent tasks',
       '- [x] Write docs\n  - [x] README\n- [x] Run tests',
     ].join('\n\n'),
   )
@@ -248,4 +249,67 @@ test('with renaming on, no title is suggested', { options: { renameSession: true
   await $.turn.complete(turn('One.', 't1'))
   await $.turn.complete(turn('Two.', 't2'))
   expect(prompts.some(prompt => prompt.includes('RETITLE'))).toBe(false)
+})
+
+test('moveTask hands a main task with its subtasks to the other card, and a subtask alone', () => {
+  const list = [
+    { id: 'a', subject: 'Push', status: 'pending' as const },
+    { id: 'a1', subject: 'Tag', status: 'pending' as const, parentId: 'a' },
+    { id: 'b', subject: 'Review', status: 'pending' as const, owner: 'user' as const },
+  ]
+  expect(moveTask(list, 'a').map(task => [task.id, task.owner])).toEqual([
+    ['a', 'user'],
+    ['a1', 'user'],
+    ['b', 'user'],
+  ])
+  const subtask = moveTask(list, 'a1').find(task => task.id === 'a1')
+  expect(subtask).toEqual({ id: 'a1', subject: 'Tag', status: 'pending', owner: 'user' })
+  expect(describeChanges(list, moveTask(list, 'b'))).toBe('The user edited the session checklist: handed "Review" to you.')
+  expect(handoffMarkdown('', '', list, [])).toContain('## Your to-dos\n\n- [ ] Review')
+})
+
+test('a to-do of your own goes in your card, and the agent hears of it as a note', { options: { checkTasks: false } }, async ($, on) => {
+  mock.store(on)
+  const session = mock.session(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'Nothing for you yet.' })).toBeDefined()
+  await pane.input({ key: 'add-task-mine-0', text: 'Push develop' })
+  expect(await pane.find({ type: 'Text', text: 'Push develop' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Nothing for you yet.' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'No tasks yet.' })).toBeDefined()
+  await pane.unmount()
+  expect(JSON.stringify(session.appended())).toContain('It is theirs to do, not yours')
+})
+
+test('the status model suggests your next step; Add puts it in your card, Dismiss for good', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('turn.complete', async () => ({ text: '' }))
+  let move = 'Push the branch'
+  on('model.complete', async () => ({
+    value: {
+      isAnswered: true as const,
+      text: `TITLE: Ship\nGOAL: Ship it\nDONE_WHEN: [ ] Pushed\nDONE: Committed\nNEXT: Push\nDRIFT: none\nYOUR_MOVE: ${move}`,
+      usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    },
+  }))
+  await $.turn.complete(turn('Committed.', 't1'))
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'Your next step?' })).toBeDefined()
+  await pane.press({ key: 'add-move' })
+  expect(await pane.find({ type: 'Text', text: 'Your next step?' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Push the branch' })).toBeDefined()
+  // Already in your card: not offered again.
+  await $.turn.complete(turn('Still waiting.', 't2'))
+  expect(await pane.find({ type: 'Text', text: 'Your next step?' })).toBeUndefined()
+
+  move = 'Review the PR'
+  await $.turn.complete(turn('PR open.', 't3'))
+  await pane.press({ key: 'dismiss-move' })
+  await $.turn.complete(turn('Still open.', 't4'))
+  expect(await pane.find({ type: 'Text', text: 'Review the PR' })).toBeUndefined()
+  await pane.unmount()
 })

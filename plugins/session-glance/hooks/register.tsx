@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
-import type { Spent, Task } from '../types'
+import type { Owner, Spent, Task } from '../types'
 import { HANDLE_CELLS } from './task-list'
-import { displayRows, planDrop, progress, shownStatus } from './tree'
+import { displayRows, moveTask, ownedBy, ownerOf, planDrop, progress, shownStatus } from './tree'
 import type { Row, ShownStatus } from './tree'
 
 const PANE = 'session-glance'
@@ -36,6 +36,11 @@ const titleSuggestion = atom({ plugin: 'session-glance', key: 'titleSuggestion' 
 const pendingTitle = atom({ plugin: 'session-glance', key: 'pendingTitle' } as const, '')
 /** Suggestions the person dismissed, lowercased, so the same one is not offered again. */
 const dismissedTitles = atom({ plugin: 'session-glance', key: 'dismissedTitles' } as const, [] as string[])
+const isMineOpen = atom({ plugin: 'session-glance', key: 'isMineOpen' } as const, true)
+const mineAddCount = atom({ plugin: 'session-glance', key: 'mineAddCount' } as const, 0)
+/** The next thing the person must do, as the status model reads the last exchange; offered in the You card. */
+const moveSuggestion = atom({ plugin: 'session-glance', key: 'moveSuggestion' } as const, '')
+const dismissedMoves = atom({ plugin: 'session-glance', key: 'dismissedMoves' } as const, [] as string[])
 
 /** The person's settings (`userConfig`), set by `register` on every load; a change in the config menu reloads it. */
 const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true, isTitleSuggest: true }
@@ -75,6 +80,8 @@ export type Snapshot = {
   titleAnchor: string
   titleSuggestion: string
   dismissedTitles: string[]
+  moveSuggestion: string
+  dismissedMoves: string[]
 }
 
 /** Saves what the pane shows under this session's id, so /resume and a restart bring it back. */
@@ -95,6 +102,8 @@ async function save($: EngineInterface): Promise<void> {
       titleAnchor: await read($, titleAnchor),
       titleSuggestion: await read($, titleSuggestion),
       dismissedTitles: await read($, dismissedTitles),
+      moveSuggestion: await read($, moveSuggestion),
+      dismissedMoves: await read($, dismissedMoves),
     }
     await $.store.set(`${SNAPSHOT_PREFIX}${id}`, snapshot)
     const ids = [...(((await $.store.get(SNAPSHOT_INDEX)) as string[] | undefined) ?? []).filter(one => one !== id), id]
@@ -127,6 +136,8 @@ async function restore($: EngineInterface): Promise<void> {
       await update($, titleAnchor, () => saved?.titleAnchor ?? '')
       await update($, titleSuggestion, () => saved?.titleSuggestion ?? '')
       await update($, dismissedTitles, () => saved?.dismissedTitles ?? [])
+      await update($, moveSuggestion, () => saved?.moveSuggestion ?? '')
+      await update($, dismissedMoves, () => saved?.dismissedMoves ?? [])
       await update($, pendingTitle, () => '')
       await update($, lastAnswer, () => '')
     }
@@ -179,9 +190,9 @@ const DEMO_TASKS: Task[] = [
   { id: 'demo-7', subject: 'Ship the drag-and-drop editor', status: 'pending' },
   { id: 'demo-7a', subject: 'Draw the drop line', status: 'completed', parentId: 'demo-7' },
   { id: 'demo-7b', subject: 'Nest by dragging sideways', status: 'completed', parentId: 'demo-7' },
-  { id: 'demo-8', subject: 'Write the README', status: 'pending' },
-  { id: 'demo-8a', subject: 'Explain the /glance command', status: 'pending', parentId: 'demo-8' },
-  { id: 'demo-8b', subject: 'Add screenshots', status: 'pending', parentId: 'demo-8' },
+  { id: 'demo-8', subject: 'Write the README', status: 'pending', owner: 'user' },
+  { id: 'demo-8a', subject: 'Explain the /glance command', status: 'pending', parentId: 'demo-8', owner: 'user' },
+  { id: 'demo-8b', subject: 'Add screenshots', status: 'pending', parentId: 'demo-8', owner: 'user' },
 ]
 
 /**
@@ -209,7 +220,7 @@ export function splitReply(reply: string): { title: string; summary: string } {
 export function parseSummary(text: string): Record<string, string> {
   const fields: Record<string, string> = {}
   for (const line of text.split('\n')) {
-    const match = line.match(/^\s*[-*]?\s*(goal|done[\s_-]*when|done|next|drift|retitle)\s*:\s*(.+)$/i)
+    const match = line.match(/^\s*[-*]?\s*(goal|done[\s_-]*when|done|next|drift|retitle|your[\s_-]*move)\s*:\s*(.+)$/i)
     if (match?.[1] && match[2]) {
       fields[match[1].toLowerCase().replace(/[\s-]+/g, '_')] = match[2].trim()
     }
@@ -270,9 +281,13 @@ export function handoffMarkdown(sessionTitle: string, text: string, all: readonl
     fields.done ? `**Done:** ${fields.done}` : '',
     fields.next ? `**Next:** ${fields.next}` : '',
   ].filter(part => part !== '')
-  const checklist = displayRows(all).map(row => `${row.depth === 1 ? '  ' : ''}- [${row.shown === 'completed' ? 'x' : ' '}] ${row.task.subject}`)
+  const section = (heading: string, owner: Owner): string[] => {
+    const lines = displayRows(ownedBy(all, owner)).map(row => `${row.depth === 1 ? '  ' : ''}- [${row.shown === 'completed' ? 'x' : ' '}] ${row.task.subject}`)
 
-  return [`# ${sessionTitle || 'Session'}`, ...status, ...(checklist.length > 0 ? ['## Tasks', checklist.join('\n')] : [])].join('\n\n')
+    return lines.length > 0 ? [heading, lines.join('\n')] : []
+  }
+
+  return [`# ${sessionTitle || 'Session'}`, ...status, ...section('## Agent tasks', 'agent'), ...section('## Your to-dos', 'user')].join('\n\n')
 }
 
 /** What a compaction is told to keep: the goal and its done-when, word for word; empty with neither. */
@@ -289,13 +304,14 @@ export function summaryPrompt(previous: string, prompt: string, answer: string, 
   const doneWhen = formatCriteria(parseCriteria(fields.done_when, tickedKeys))
 
   return [
-    `You keep a glanceable status of a coding session. Reply with exactly these ${titleToCheck === '' ? 'six' : 'seven'} lines and nothing else:`,
+    `You keep a glanceable status of a coding session. Reply with exactly these ${titleToCheck === '' ? 'seven' : 'eight'} lines and nothing else:`,
     'TITLE: <session title, max 6 words>',
     'GOAL: <what the user is after, max 12 words>',
     'DONE_WHEN: <1-4 checkable criteria that mean the goal is reached, max 8 words each, separated by "; ", each starting [x] when met, else [ ]>',
     'DONE: <what was just finished, max 12 words>',
     'NEXT: <the next step or open question, max 12 words>',
     'DRIFT: <when the latest exchange did not serve GOAL, what happened instead, max 10 words; else none>',
+    "YOUR_MOVE: <when the next step is the user's own (push, review, answer a question, decide, test by hand), that step as a short imperative, max 8 words; else none>",
     ...(titleToCheck === ''
       ? []
       : [
@@ -382,12 +398,20 @@ export function describeChanges(before: readonly Task[], after: readonly Task[])
 
     return old && old.subject !== task.subject ? [`"${old.subject}" to "${task.subject}"`] : []
   })
+  const moved = after.flatMap(task => {
+    const old = before.find(one => one.id === task.id)
+
+    return old && ownerOf(old) !== ownerOf(task) && task.parentId === undefined
+      ? [ownerOf(task) === 'user' ? `moved "${task.subject}" to their own to-dos (theirs to do now, not yours)` : `handed "${task.subject}" to you`]
+      : []
+  })
   const kept = before.filter(task => after.some(one => one.id === task.id)).map(task => task.id)
   const isReordered = kept.join() !== after.filter(task => kept.includes(task.id)).map(task => task.id).join()
   const parts = [
     added.length > 0 ? `added ${added.join(', ')}` : '',
     removed.length > 0 ? `removed ${removed.join(', ')} (do not work on them unless asked)` : '',
     renamed.length > 0 ? `renamed ${renamed.join(', ')}` : '',
+    ...moved,
     isReordered ? `reordered the checklist to: ${after.map(task => `"${task.subject}"`).join(', ')}` : '',
   ].filter(part => part !== '')
 
@@ -441,17 +465,50 @@ async function validateTask($: EngineInterface, typed: string, others: readonly 
   }
 }
 
-async function addTask($: EngineInterface, typed: string): Promise<void> {
+async function addTask($: EngineInterface, typed: string, owner: Owner = 'agent'): Promise<void> {
   if (typed.trim() === '') {
     return
   }
-  await update($, addCount, n => n + 1)
-  const subject = await validateTask($, typed.trim(), await read($, tasks))
+  // One update per atom: the engine lists what a module writes from the atom named at each call.
+  if (owner === 'user') {
+    await update($, mineAddCount, n => n + 1)
+  } else {
+    await update($, addCount, n => n + 1)
+  }
+  const subject = await validateTask($, typed.trim(), ownedBy(await read($, tasks), owner))
   if (subject === undefined) {
     return
   }
-  await update($, tasks, list => [...list, { id: `user-${crypto.randomUUID().slice(0, 8)}`, subject, status: 'pending' as const }])
-  await tellModel($, `The user added the task "${subject}" to the session checklist.`)
+  await addOwnTask($, subject, owner)
+}
+
+/** Adds a checked task to a card; the agent hears of a to-do of the person's own as a note, not as work. */
+async function addOwnTask($: EngineInterface, subject: string, owner: Owner): Promise<void> {
+  const task: Task = { id: `user-${crypto.randomUUID().slice(0, 8)}`, subject, status: 'pending', ...(owner === 'user' ? { owner } : {}) }
+  await update($, tasks, list => [...list, task])
+  await tellModel(
+    $,
+    owner === 'user'
+      ? `The user noted a to-do of their own: "${subject}". It is theirs to do, not yours; bring it up when it becomes relevant.`
+      : `The user added the task "${subject}" to the session checklist.`,
+  )
+  await save($)
+}
+
+/** Takes the suggested next step into the You card. */
+async function acceptMove($: EngineInterface): Promise<void> {
+  const subject = await read($, moveSuggestion)
+  if (subject === '') {
+    return
+  }
+  await update($, moveSuggestion, () => '')
+  await addOwnTask($, subject, 'user')
+}
+
+async function dismissMove($: EngineInterface): Promise<void> {
+  const subject = await read($, moveSuggestion)
+  await update($, dismissedMoves, list => [...list, subject.toLowerCase()].slice(-20))
+  await update($, moveSuggestion, () => '')
   await save($)
 }
 
@@ -486,6 +543,12 @@ async function addSubtaskInDraft($: EngineInterface, parent: Task, typed: string
 async function removeFromDraft($: EngineInterface, task: Task): Promise<void> {
   await update($, draft, list => list.filter(one => one.id !== task.id && one.parentId !== task.id))
   await update($, selectedId, current => (current === task.id ? '' : current))
+}
+
+/** Hands a task (and its subtasks) to the other card in the edit draft. */
+async function moveInDraft($: EngineInterface, task: Task): Promise<void> {
+  await update($, draft, list => moveTask(list, task.id))
+  await update($, selectedId, () => '')
 }
 
 async function startEditing($: EngineInterface): Promise<void> {
@@ -543,9 +606,11 @@ async function changeStatus($: EngineInterface, task: Task): Promise<void> {
   await update($, tasks, list =>
     list.map(one => (one.id === task.id || (isCarried && one.parentId === task.id) ? { ...one, status: choice.status } : one)),
   )
-  const sync = task.id.startsWith('demo-') || task.id.startsWith('user-') ? '' : ` If it is in your task list (id ${task.id}), update it to match.`
+  const sync =
+    task.id.startsWith('demo-') || task.id.startsWith('user-') || ownerOf(task) === 'user' ? '' : ` If it is in your task list (id ${task.id}), update it to match.`
   const carried = isCarried ? `, and with it its ${children.length} subtasks` : ''
-  await tellModel($, `The user marked the task "${task.subject}" as ${STATUS_WORDS[choice.status]}${carried} in the session pane.${sync}`)
+  const which = ownerOf(task) === 'user' ? 'their own to-do' : 'the task'
+  await tellModel($, `The user marked ${which} "${task.subject}" as ${STATUS_WORDS[choice.status]}${carried} in the session pane.${sync}`)
   await save($)
 }
 
@@ -560,9 +625,10 @@ async function summarize($: EngineInterface): Promise<boolean> {
   }
   await update($, isSummarizing, () => true)
   const anchor = await read($, titleAnchor)
+  const dismissedTodo = await read($, dismissedMoves)
   try {
     const reply = await complete($, {
-      system: 'Answer only with the labelled lines asked for (TITLE, GOAL, DONE_WHEN, DONE, NEXT, DRIFT, and RETITLE when asked). No other labels, no extra lines.',
+      system: 'Answer only with the labelled lines asked for (TITLE, GOAL, DONE_WHEN, DONE, NEXT, DRIFT, YOUR_MOVE, and RETITLE when asked). No other labels, no extra lines.',
       prompt: summaryPrompt(await read($, summary), await read($, lastPrompt), answer, await read($, ticked), settings.isTitleSuggest ? anchor : ''),
       maxTokens: 300,
     })
@@ -582,6 +648,8 @@ async function summarize($: EngineInterface): Promise<boolean> {
       await update($, titleSuggestion, () => suggestion)
       $.ui.toast(`Title suggestion: ${suggestion}`)
     }
+    const mine = ownedBy(await read($, tasks), 'user').filter(task => task.status !== 'completed').map(task => task.subject.toLowerCase())
+    await update($, moveSuggestion, () => suggestionFrom(parseSummary(parts.summary).your_move, '', [...(dismissedTodo ?? []), ...mine]))
 
     return true
   } finally {
@@ -646,6 +714,8 @@ async function purge($: EngineInterface): Promise<boolean> {
   await update($, titleAnchor, () => '')
   await update($, titleSuggestion, () => '')
   await update($, dismissedTitles, () => [])
+  await update($, moveSuggestion, () => '')
+  await update($, dismissedMoves, () => [])
   await update($, draft, () => [])
   await update($, selectedId, () => '')
   await update($, isManaging, () => false)
@@ -742,6 +812,7 @@ export const register: Register = (on, options) => {
       await update($, folded, () => DEMO_FOLDED)
       await update($, ticked, () => [])
       await update($, titleAnchor, () => DEMO_TITLE)
+      await update($, moveSuggestion, () => 'Push the branch')
       await save($)
       await openPane($)
 
@@ -856,9 +927,10 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('ui.message', async ($, e, next) => {
-    if (e.element !== 'edit-overlay') {
+    if (e.element !== 'edit-overlay' && e.element !== 'edit-overlay-mine') {
       return next(e)
     }
+    const owner: Owner = e.element === 'edit-overlay-mine' ? 'user' : 'agent'
     const data = e.data as { type: 'drop' | 'select' | 'remove' | 'fold'; id: string; slot?: number; dx?: number }
     const task = (await read($, draft)).find(one => one.id === data.id)
     if (task === undefined) {
@@ -866,7 +938,8 @@ export const register: Register = (on, options) => {
     }
     if (data.type === 'drop') {
       const foldedIds = await read($, folded)
-      await update($, draft, list => planDrop(list, data.id, data.slot ?? 0, data.dx ?? 0, foldedIds).list)
+      // Each card has its own layer and rows, so the drop is planned within that card's tasks.
+      await update($, draft, list => [...planDrop(ownedBy(list, owner), data.id, data.slot ?? 0, data.dx ?? 0, foldedIds).list, ...list.filter(one => ownerOf(one) !== owner)])
     } else if (data.type === 'select') {
       await update($, selectedId, current => (current === data.id ? '' : data.id))
     } else if (data.type === 'remove') {
@@ -885,7 +958,9 @@ export const register: Register = (on, options) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const isOpen = await read($, isPaneOpen)
     const list = await read($, tasks)
-    const { done, total } = progress(list)
+    const { done, total } = progress(ownedBy(list, 'agent'))
+    const mineOpen = progress(ownedBy(list, 'user'))
+    const openForYou = mineOpen.total - mineOpen.done
     const current = await read($, title)
     const toggle = async (): Promise<void> => {
       if (isOpen) {
@@ -907,6 +982,7 @@ export const register: Register = (on, options) => {
         <Text size="footnote" color="inactive" wrap="truncate-end">
           {current || 'No status yet'}
           {total > 0 ? `  ·  ${done}/${total} tasks` : ''}
+          {openForYou > 0 ? `  ·  ${openForYou} for you` : ''}
         </Text>
       </Box>
     )
@@ -932,10 +1008,11 @@ export const register: Register = (on, options) => {
     const chosenTitle = await read($, pendingTitle)
     const busy = await read($, isSummarizing)
     const stored = managing ? await read($, draft) : await read($, tasks)
-    const rows = displayRows(stored, foldedIds)
     const showSummary = await read($, isSummaryOpen)
     const showTasks = await read($, isTasksOpen)
-    const { done, total } = progress(stored)
+    const showMine = await read($, isMineOpen)
+    const mineAdds = await read($, mineAddCount)
+    const nextMove = await read($, moveSuggestion)
     const hasSummary = Object.keys(fields).length > 0
     const isTerminal = e.surface === 'terminal'
     const type = TYPE
@@ -984,7 +1061,7 @@ export const register: Register = (on, options) => {
     const toggleFold = (id: string) => update($, folded, ids => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id]))
 
     /** One task row: checkbox, text that shrinks before anything is pushed out, subtask count and fold caret, trash in Edit mode. */
-    const taskRow = (row: Row, isEditing: boolean) => {
+    const taskRow = (row: Row, isEditing: boolean, isFirst: boolean) => {
       const isFolded = foldedIds.includes(row.task.id)
       // The caret sits at the row's end, so rows with and without one keep their checkboxes in line.
       const fold =
@@ -1001,7 +1078,7 @@ export const register: Register = (on, options) => {
           minWidth={0}
           paddingLeft={row.depth === 1 && !isEditing ? 3 : 0}
           // Edit rows keep their fixed pitch: the layer over them maps the pointer by it.
-          marginTop={!isEditing && row.depth === 0 && row !== rows[0] ? airy : 0}
+          marginTop={!isEditing && row.depth === 0 && !isFirst ? airy : 0}
         >
           {isEditing && (
             <Box width={HANDLE_CELLS + (row.depth === 1 ? 3 : 0)} flexShrink={0}>
@@ -1033,6 +1110,140 @@ export const register: Register = (on, options) => {
           {row.children > 0 && note(`${row.childrenDone}/${row.children}`)}
           {fold}
           {isEditing && iconButton(`remove-${row.task.id}`, TRASH, 'Remove', '✕', () => removeFromDraft($, row.task))}
+        </Box>
+      )
+    }
+
+    /** One task card: the agent's tasks, or the person's own to-dos. Edit mode covers both cards at once. */
+    const taskCard = (owner: Owner) => {
+      const isMine = owner === 'user'
+      // The agent's card keeps the keys it had before the split.
+      const suffix = isMine ? '-mine' : ''
+      const list = ownedBy(stored, owner)
+      const rows = displayRows(list, foldedIds)
+      const { done, total } = progress(list)
+      const isOpen = isMine ? showMine : showTasks
+      // The Edit-mode hint is said once: in the agent's card, or in yours when the agent has none.
+      const hasHint = !isMine || ownedBy(stored, 'agent').length === 0
+
+      return (
+        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
+          {header(
+            `toggle-tasks${suffix}`,
+            isMine ? 'Your to-dos' : 'Agent tasks',
+            isOpen,
+            <Box gap="sm" alignItems="center">
+              {checking || total === 0 || done < total ? (
+                note(checking ? 'checking…' : total > 0 ? `${done}/${total}` : '')
+              ) : (
+                <Text size={type.text} color="success">
+                  {`${done}/${total}`}
+                </Text>
+              )}
+              {isOpen && !managing && (
+                <Button key={`toggle-manage${suffix}`} plain onPress={() => startEditing($)}>
+                  <Text size={type.text} color="subtle">
+                    Edit
+                  </Text>
+                </Button>
+              )}
+              {isOpen && managing && (
+                <Button key={`cancel-edit${suffix}`} plain onPress={() => stopEditing($, false)}>
+                  <Text size={type.text} color="subtle">
+                    Cancel
+                  </Text>
+                </Button>
+              )}
+              {isOpen && managing && (
+                <Button key={`save-edit${suffix}`} plain onPress={() => stopEditing($, true)}>
+                  <Text size={type.text} color="claude" weight="medium">
+                    Save
+                  </Text>
+                </Button>
+              )}
+            </Box>,
+            () => (isMine ? update($, isMineOpen, open => !open) : update($, isTasksOpen, open => !open)),
+          )}
+          {isOpen && isMine && nextMove !== '' && !managing && (
+            <Box flexDirection="column" gap="xs" marginBottom={airy}>
+              <Text size={type.label} color="suggestion">
+                Your next step?
+              </Text>
+              <Text size={type.text}>{nextMove}</Text>
+              <Box gap="md" alignItems="center">
+                <Button key="add-move" plain onPress={() => acceptMove($)}>
+                  <Text size={type.text} color="claude" weight="medium">
+                    Add
+                  </Text>
+                </Button>
+                <Button key="dismiss-move" plain onPress={() => dismissMove($)}>
+                  <Text size={type.text} color="subtle">
+                    Dismiss
+                  </Text>
+                </Button>
+              </Box>
+            </Box>
+          )}
+          {isOpen && rows.length === 0 && note(isMine ? 'Nothing for you yet.' : 'No tasks yet.')}
+          {isOpen && managing && Client && rows.length > 0 && (
+            // The rows below hold the icons; the layer on top draws handles and the drop line and takes the clicks.
+            <Box flexDirection="column" position="relative" minWidth={0}>
+              {rows.map((row, i) => taskRow(row, true, i === 0))}
+              {isTerminal && <Box height={1} />}
+              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                <Client
+                  key={`edit-overlay${suffix}`}
+                  module="./task-list.tsx"
+                  props={{ tasks: list, folded: foldedIds, rowHeight, hasGapRows: isTerminal }}
+                  width="100%"
+                  height={Math.ceil(rows.length * rowHeight) + (isTerminal ? 1 : 0)}
+                />
+              </Box>
+            </Box>
+          )}
+          {isOpen &&
+            managing &&
+            Input &&
+            rows
+              .filter(row => row.task.id === selected)
+              .map(row => (
+                <Box flexDirection="column" gap="xs" marginTop="sm" borderStyle="round" borderColor="subtle" paddingX="sm" paddingY="sm">
+                  {note('Rename')}
+                  <Input key={`rename-${row.task.id}`} value={row.task.subject} submitLabel="Rename" onSubmit={value => renameInDraft($, row.task, value)} />
+                  {row.depth === 0 && (
+                    <Box flexDirection="column" gap="xs" marginTop="xs">
+                      {note('Add a subtask')}
+                      <Input
+                        key={`subtask-${row.task.id}-${subtaskAdds}`}
+                        placeholder="What needs doing…"
+                        submitLabel="Add"
+                        onSubmit={value => addSubtaskInDraft($, row.task, value)}
+                      />
+                    </Box>
+                  )}
+                  <Box marginTop="xs">
+                    <Button key={`move-${row.task.id}`} plain onPress={() => moveInDraft($, row.task)}>
+                      <Text size={type.text} color="subtle">
+                        {isMine ? 'Hand to the agent' : 'Move to your to-dos'}
+                      </Text>
+                    </Button>
+                  </Box>
+                </Box>
+              ))}
+          {isOpen && managing && hasHint && !selected && rows.length > 0 && (
+            <Box marginTop={airy}>{note('Drag ⠿ to reorder, sideways to nest or un-nest · click a task to rename, add subtasks or move it to the other card · nothing changes until Save')}</Box>
+          )}
+          {isOpen && (!managing || !Client) && rows.map((row, i) => taskRow(row, false, i === 0))}
+          {isOpen && Input && (
+            <Box marginTop={isTerminal ? 1 : 'sm'}>
+              <Input
+                key={`add-task${suffix}-${isMine ? mineAdds : adds}`}
+                placeholder={isMine ? 'Add a to-do for yourself…' : 'Add a task for the agent…'}
+                submitLabel="Add"
+                onSubmit={value => addTask($, value, owner)}
+              />
+            </Box>
+          )}
         </Box>
       )
     }
@@ -1127,92 +1338,8 @@ export const register: Register = (on, options) => {
           {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
         </Box>
 
-        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-          {header(
-            'toggle-tasks',
-            'Tasks',
-            showTasks,
-            <Box gap="sm" alignItems="center">
-              {checking || total === 0 || done < total ? (
-                note(checking ? 'checking…' : total > 0 ? `${done}/${total}` : '')
-              ) : (
-                <Text size={type.text} color="success">
-                  {`${done}/${total}`}
-                </Text>
-              )}
-              {showTasks && !managing && (
-                <Button key="toggle-manage" plain onPress={() => startEditing($)}>
-                  <Text size={type.text} color="subtle">
-                    Edit
-                  </Text>
-                </Button>
-              )}
-              {showTasks && managing && (
-                <Button key="cancel-edit" plain onPress={() => stopEditing($, false)}>
-                  <Text size={type.text} color="subtle">
-                    Cancel
-                  </Text>
-                </Button>
-              )}
-              {showTasks && managing && (
-                <Button key="save-edit" plain onPress={() => stopEditing($, true)}>
-                  <Text size={type.text} color="claude" weight="medium">
-                    Save
-                  </Text>
-                </Button>
-              )}
-            </Box>,
-            () => update($, isTasksOpen, open => !open),
-          )}
-          {showTasks && rows.length === 0 && note('No tasks yet.')}
-          {showTasks && managing && Client && rows.length > 0 && (
-            // The rows below hold the icons; the layer on top draws handles and the drop line and takes the clicks.
-            <Box flexDirection="column" position="relative" minWidth={0}>
-              {rows.map(row => taskRow(row, true))}
-              {isTerminal && <Box height={1} />}
-              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                <Client
-                  key="edit-overlay"
-                  module="./task-list.tsx"
-                  props={{ tasks: stored, folded: foldedIds, rowHeight, hasGapRows: isTerminal }}
-                  width="100%"
-                  height={Math.ceil(rows.length * rowHeight) + (isTerminal ? 1 : 0)}
-                />
-              </Box>
-            </Box>
-          )}
-          {showTasks &&
-            managing &&
-            Input &&
-            rows
-              .filter(row => row.task.id === selected)
-              .map(row => (
-                <Box flexDirection="column" gap="xs" marginTop="sm" borderStyle="round" borderColor="subtle" paddingX="sm" paddingY="sm">
-                  {note('Rename')}
-                  <Input key={`rename-${row.task.id}`} value={row.task.subject} submitLabel="Rename" onSubmit={value => renameInDraft($, row.task, value)} />
-                  {row.depth === 0 && (
-                    <Box flexDirection="column" gap="xs" marginTop="xs">
-                      {note('Add a subtask')}
-                      <Input
-                        key={`subtask-${row.task.id}-${subtaskAdds}`}
-                        placeholder="What needs doing…"
-                        submitLabel="Add"
-                        onSubmit={value => addSubtaskInDraft($, row.task, value)}
-                      />
-                    </Box>
-                  )}
-                </Box>
-              ))}
-          {showTasks && managing && !selected && rows.length > 0 && (
-            <Box marginTop={airy}>{note('Drag ⠿ to reorder, sideways to nest or un-nest · click a task to rename or add subtasks · nothing changes until Save')}</Box>
-          )}
-          {showTasks && (!managing || !Client) && rows.map(row => taskRow(row, false))}
-          {showTasks && Input && (
-            <Box marginTop={isTerminal ? 1 : 'sm'}>
-              <Input key={`add-task-${adds}`} placeholder="Add a task…" submitLabel="Add" onSubmit={value => addTask($, value)} />
-            </Box>
-          )}
-        </Box>
+        {taskCard('agent')}
+        {taskCard('user')}
         {cost.calls > 0 && (
           <Text size="footnote" color="inactive">
             {`glance: ${cost.calls} ${cost.calls === 1 ? 'call' : 'calls'} · ${formatTokens(cost.input + cost.output)} tokens (${formatTokens(cost.output)} out) · ${settings.model}`}

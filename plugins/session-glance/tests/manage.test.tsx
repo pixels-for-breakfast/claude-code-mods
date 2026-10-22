@@ -184,7 +184,7 @@ test('marking a main task done carries to its subtasks', async ($, on) => {
   await $.command.run({ command: 'glance', args: 'demo' } as never)
   const ui = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
   await ui.press({ key: 'task-demo-3' })
-  expect(await ui.find({ type: 'Text', text: '6/11' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '6/9' })).toBeDefined()
   await ui.unmount()
 })
 

@@ -59,13 +59,13 @@ test('the pane shows the summary and a checklist of tasks', async ($, on) => {
   await demo.unmount()
   expect(asked).toEqual(['What should happen to "Seed fake tasks for a demo"?'])
   const band2 = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 80 } as never })
-  expect(await band2.find({ type: 'Text', text: /6\/11 tasks/ })).toBeDefined()
+  expect(await band2.find({ type: 'Text', text: /6\/9 tasks  ·  2 for you/ })).toBeDefined()
   await band2.unmount()
 
   await $.command.run({ command: 'glance', args: 'demo' } as never)
   const band = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'AbovePrompt', props: { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 80 } as never })
   // The demo prefills the status and title too, replacing what the turn above wrote.
-  expect(await band.find({ type: 'Text', text: /Session glance demo\s+·\s+5\/11 tasks/ })).toBeDefined()
+  expect(await band.find({ type: 'Text', text: /Session glance demo\s+·\s+5\/9 tasks\s+·\s+2 for you/ })).toBeDefined()
   const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
   for (const label of ['Goal', 'Done when', 'Done', 'Next']) {
     expect(await pane.find({ type: 'Text', text: label })).toBeDefined()

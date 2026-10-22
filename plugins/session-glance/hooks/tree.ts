@@ -1,4 +1,4 @@
-import type { Task, TaskStatus } from '../types'
+import type { Owner, Task, TaskStatus } from '../types'
 
 /** What a row shows: a task's own status, or `partial` for a main task whose subtasks are part done. */
 export type ShownStatus = TaskStatus | 'partial'
@@ -130,4 +130,36 @@ export function planDrop(all: readonly Task[], dragId: string, slot: number, dx:
   const next = after.slice(landed + 1).find(row => !isInBlock(row))
 
   return { list, lineBeforeId: next ? next.task.id : null, depth }
+}
+
+/** Whose a task is; a task saved before owners existed is the agent's. */
+export function ownerOf(task: Task): Owner {
+  return task.owner ?? 'agent'
+}
+
+/** The tasks one card shows, in their stored order. */
+export function ownedBy(all: readonly Task[], owner: Owner): Task[] {
+  return all.filter(task => ownerOf(task) === owner)
+}
+
+/**
+ * Hands a task to the other card. A main task takes its subtasks along; a subtask goes
+ * on its own and becomes a main task there, since its parent stays behind.
+ */
+export function moveTask(all: readonly Task[], id: string): Task[] {
+  const task = all.find(one => one.id === id)
+  if (task === undefined) {
+    return [...all]
+  }
+  const owner: Owner = ownerOf(task) === 'agent' ? 'user' : 'agent'
+
+  return all.map(one => {
+    if (one.id === id) {
+      const { parentId: _parent, ...rest } = one
+
+      return { ...rest, owner }
+    }
+
+    return one.parentId === id ? { ...one, owner } : one
+  })
 }

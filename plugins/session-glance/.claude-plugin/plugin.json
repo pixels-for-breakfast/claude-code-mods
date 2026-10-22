@@ -1,7 +1,7 @@
 {
   "name": "session-glance",
-  "version": "0.2.0",
-  "description": "Sidebar pane with a rolling summary of the session and a checklist of its tasks",
+  "version": "0.3.0",
+  "description": "A pane with a rolling status of the session, the agent's tasks and your own to-dos",
   "author": {
     "name": "Pixels for Breakfast",
     "url": "https://pixelsforbreakfast.nl"

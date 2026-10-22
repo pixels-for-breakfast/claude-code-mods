@@ -3,7 +3,8 @@
 A pane beside the Claude Code chat that shows where a session stands, without asking the agent and spending a turn on it:
 
 - **Status:** a rolling summary after every answer: goal, done-when criteria, what was just done, what is next, and a quiet line when a turn drifted off the goal.
-- **Tasks:** a checklist that fills itself from the agent's own task tools (`TaskCreate`, `TaskUpdate`, `TodoWrite`), with subtasks, progress and an Edit mode.
+- **Agent tasks:** a checklist that fills itself from the agent's own task tools (`TaskCreate`, `TaskUpdate`, `TodoWrite`), with subtasks, progress and an Edit mode.
+- **Your to-dos:** what you have to do yourself (push, review, decide, test by hand), with the next step suggested from the conversation.
 
 ## Install
 
@@ -28,7 +29,7 @@ The pane opens at the start of a session. Toggle it with `/glance`, or with the 
 | Command | What it does |
 | --- | --- |
 | `/glance` | Opens or closes the pane |
-| `/glance copy` | Copies the status and checklist as markdown, for a PR description, a standup or the next session; prints it where no clipboard is reachable |
+| `/glance copy` | Copies the status and both checklists as markdown, for a PR description, a standup or the next session; prints it where no clipboard is reachable |
 | `/glance refresh` | Updates the status from the last answer (for when automatic updates are off) |
 | `/glance purge` | Clears the status, title and every task, after asking |
 | `/glance demo` | Fills the pane with a demo of every state it can show |
@@ -41,12 +42,14 @@ The pane opens at the start of a session. Toggle it with `/glance`, or with the 
 - **Title suggestion** appears when the session's work as a whole has moved away from its title. **Use** sets it as the session title at your next prompt; **Dismiss** keeps it from being offered again.
 - The footer shows what the mod itself has spent this session: model calls, tokens and the model in use.
 
-**Tasks card**
+**Agent tasks and Your to-dos**
 
+- Two cards: the agent's tasks, and the things you have to do yourself. Each has its own progress count; the band above the prompt shows the agent's count and how many to-dos are open for you.
 - Click a task to mark it done, start it or reopen it. A main task with subtasks shows how many are done, and its state follows them.
-- **Edit** opens Edit mode: drag `⠿` to reorder, drag sideways to nest a task under the one above or take it out again, click a task to rename it or add subtasks, and use the bin to remove one. Nothing changes until **Save**.
-- **Add a task** adds one of your own. The model tidies the wording and asks when it is unclear or a duplicate.
-- Every change you make is passed to the agent, so it works from the same list.
+- **Edit** opens Edit mode in both cards: drag `⠿` to reorder, drag sideways to nest a task under the one above or take it out again, click a task to rename it, add subtasks or move it to the other card (a main task takes its subtasks along), and use the bin to remove one. Nothing changes until **Save**.
+- Each card has its own add field. The model tidies the wording and asks when it is unclear or a duplicate.
+- **Your next step?** appears in your card when the conversation leaves the next move to you, such as pushing a branch or answering a question. **Add** puts it in your to-dos; **Dismiss** keeps it from being offered again.
+- Every change you make is passed to the agent, so it works from the same lists. A to-do in your card reaches it as a note, not as work for it.
 
 The pane is saved per session: `/resume` and a restart bring it back, `/clear` starts it empty. A compaction is told to keep the goal and done-when.
 

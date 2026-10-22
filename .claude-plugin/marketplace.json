@@ -6,7 +6,7 @@
     {
       "name": "session-glance",
       "source": "./plugins/session-glance",
-      "description": "Sidebar pane with a rolling summary of the session and a checklist of its tasks"
+      "description": "A pane with a rolling status of the session, the agent's tasks and your own to-dos"
     }
   ]
 }
