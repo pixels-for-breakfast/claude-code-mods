@@ -6,7 +6,9 @@ A [Claude Code](https://claude.com/claude-code) plugin marketplace with mods by 
 
 | Mod | What it does |
 | --- | --- |
-| [session-glance](plugins/session-glance) | A sidebar pane with a rolling summary of the session (goal, done when, done, next) and a checklist of its tasks |
+| [session-glance](plugins/session-glance) | A pane beside the chat with a rolling status of the session (goal, done-when criteria, done, next, drift) and a checklist that fills itself from the agent's tasks; copies both as markdown |
+
+Each mod's own README covers its commands, settings, and what it sends to the model.
 
 ## Install
 

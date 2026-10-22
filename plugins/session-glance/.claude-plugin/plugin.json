@@ -1,6 +1,6 @@
 {
   "name": "session-glance",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sidebar pane with a rolling summary of the session and a checklist of its tasks",
   "author": {
     "name": "Pixels for Breakfast",
