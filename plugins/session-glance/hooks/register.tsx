@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren } from 'claude-code'
+import type { EngineInterface, Register, RenderChildren, RenderSurface } from 'claude-code'
 
 import type { Spent, Task } from '../types'
 import { HANDLE_CELLS } from './task-list'
@@ -201,6 +201,24 @@ export function formatCriteria(criteria: readonly Criterion[]): string {
 /** The drift line to show, or empty when the turn served the goal. */
 export function driftNote(drift: string | undefined): string {
   return drift === undefined || /^(none|no|n\/a|-)?\.?$/i.test(drift.trim()) ? '' : drift.trim()
+}
+
+/**
+ * The session as markdown to paste into a PR, a standup or the next session: title, status,
+ * done-when as checkboxes and the whole checklist (folded subtasks too) in the pane's order.
+ */
+export function handoffMarkdown(sessionTitle: string, text: string, all: readonly Task[], tickedKeys: readonly string[]): string {
+  const fields = parseSummary(text)
+  const criteria = parseCriteria(fields.done_when, tickedKeys)
+  const status = [
+    fields.goal ? `**Goal:** ${fields.goal}` : '',
+    criteria.length > 0 ? ['**Done when:**', ...criteria.map(criterion => `- [${criterion.isMet ? 'x' : ' '}] ${criterion.text}`)].join('\n') : '',
+    fields.done ? `**Done:** ${fields.done}` : '',
+    fields.next ? `**Next:** ${fields.next}` : '',
+  ].filter(part => part !== '')
+  const checklist = displayRows(all).map(row => `${row.depth === 1 ? '  ' : ''}- [${row.shown === 'completed' ? 'x' : ' '}] ${row.task.subject}`)
+
+  return [`# ${sessionTitle || 'Session'}`, ...status, ...(checklist.length > 0 ? ['## Tasks', checklist.join('\n')] : [])].join('\n\n')
 }
 
 /** What a compaction is told to keep: the goal and its done-when, word for word; empty with neither. */
@@ -473,6 +491,15 @@ async function changeStatus($: EngineInterface, task: Task): Promise<void> {
 /** Type and spacing: two steps up the API's five sizes (caption, footnote, body, heading, title), for reading at a glance. */
 const TYPE = { text: 'heading', label: 'body', head: 'title', icon: 24, padX: 'xl', padY: 'lg' } as const
 
+/** Puts the handoff on a surface's clipboard; the result says whether it took, with the markdown either way. */
+async function copyHandoff($: EngineInterface, surface?: RenderSurface): Promise<{ isCopied: boolean; markdown: string; hasStatus: boolean }> {
+  const text = await read($, summary)
+  const markdown = handoffMarkdown(await read($, title), text, await read($, tasks), await read($, ticked))
+  const copied = await $.ui.copy(surface === undefined ? { text: markdown } : { text: markdown, surface })
+
+  return { isCopied: copied.isCopied, markdown, hasStatus: text.trim() !== '' }
+}
+
 /** Ticks or unticks a done-when criterion by hand and tells the model; a hand tick outlasts the model's own view. */
 async function toggleCriterion($: EngineInterface, criterion: Criterion): Promise<void> {
   const key = criterion.text.toLowerCase()
@@ -517,7 +544,7 @@ async function openPane($: EngineInterface): Promise<void> {
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await restore($)
-    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance demo` fills in a demo, `/glance purge` clears it, `/glance rename on|off` sets session renaming)' })
+    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance demo` fills in a demo, `/glance purge` clears it, `/glance rename on|off` sets session renaming)' })
     void openPane($)
 
     return next(e)
@@ -537,6 +564,17 @@ export const register: Register = (on, options) => {
       }
 
       return { text: isOn ? 'The status title will now rename this session at your next prompt.' : 'Sessions keep their own title now.' }
+    }
+    if (e.args.trim() === 'copy') {
+      if ((await read($, summary)).trim() === '' && (await read($, tasks)).length === 0) {
+        return { text: 'Nothing to copy yet: no status and no tasks.' }
+      }
+      const { isCopied, markdown, hasStatus } = await copyHandoff($)
+      if (!isCopied) {
+        return { text: `No clipboard to reach here; copy it from below.\n\n${markdown}` }
+      }
+
+      return { text: hasStatus ? 'Copied the session status and checklist as markdown.' : 'Copied the checklist as markdown; there is no status yet.' }
     }
     if (e.args.trim() === 'purge') {
       return { text: (await purge($)) ? 'Cleared the status, title and every task.' : 'Nothing was cleared.' }
@@ -845,7 +883,29 @@ export const register: Register = (on, options) => {
     return (
       <Box flexDirection="column" gap="lg" padding={isTerminal ? 0 : 'md'}>
         <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-          {header('toggle-summary', 'Status', showSummary, note(busy ? 'updating…' : ''), () => update($, isSummaryOpen, open => !open))}
+          {header(
+            'toggle-summary',
+            'Status',
+            showSummary,
+            <Box gap="sm" alignItems="center">
+              {note(busy ? 'updating…' : '')}
+              {(hasSummary || stored.length > 0) && !managing && (
+                <Button
+                  key="copy-handoff"
+                  plain
+                  onPress={async () => {
+                    const { isCopied } = await copyHandoff($, e.surface)
+                    $.ui.toast(isCopied ? 'Copied the session as markdown' : 'No clipboard here: /glance copy prints it')
+                  }}
+                >
+                  <Text size={type.text} color="subtle">
+                    Copy
+                  </Text>
+                </Button>
+              )}
+            </Box>,
+            () => update($, isSummaryOpen, open => !open),
+          )}
           {showSummary && !hasSummary && (
             <Text size={type.text} color="inactive">
               Appears after the first answer.

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { compactNote, driftNote, formatCriteria, parseCriteria } from '../hooks/register'
+import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria } from '../hooks/register'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
@@ -67,4 +67,48 @@ test('ticking every criterion says the goal is reached, and drift shows a quiet 
   await pane.press({ key: 'criterion-Docs updated' })
   expect(await pane.find({ type: 'Text', text: /Goal reached/ })).toBeDefined()
   await pane.unmount()
+})
+
+test('handoffMarkdown writes the status, done-when and checklist for a PR description', () => {
+  const markdown = handoffMarkdown(
+    'Ship it',
+    'GOAL: Ship it\nDONE_WHEN: [x] Tests pass; [ ] Docs updated\nDONE: Tests\nNEXT: Docs',
+    [
+      { id: 'a', subject: 'Write docs', status: 'pending' },
+      { id: 'b', subject: 'Run tests', status: 'completed' },
+      { id: 'a1', subject: 'README', status: 'completed', parentId: 'a' },
+    ],
+    [],
+  )
+  expect(markdown).toBe(
+    [
+      '# Ship it',
+      '**Goal:** Ship it',
+      '**Done when:**\n- [x] Tests pass\n- [ ] Docs updated',
+      '**Done:** Tests',
+      '**Next:** Docs',
+      '## Tasks',
+      '- [x] Write docs\n  - [x] README\n- [x] Run tests',
+    ].join('\n\n'),
+  )
+})
+
+test('/glance copy puts the handoff on the clipboard, or prints it when there is none', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const copied: string[] = []
+  let isAvailable = true
+  on('ui.copy', async (_$, e) => {
+    copied.push(e.text)
+
+    return { value: isAvailable ? { isCopied: true } : { isCopied: false, reason: 'no-clipboard' } }
+  })
+  expect((await $.command.run({ command: 'glance', args: 'copy' } as never)).text).toBe('Nothing to copy yet: no status and no tasks.')
+  await $.command.run({ command: 'glance', args: 'demo' } as never)
+  expect((await $.command.run({ command: 'glance', args: 'copy' } as never)).text).toBe('Copied the session status and checklist as markdown.')
+  expect(copied[0]).toContain('# Session glance demo')
+  expect(copied[0]).toContain('  - [ ] Add screenshots')
+  isAvailable = false
+  expect((await $.command.run({ command: 'glance', args: 'copy' } as never)).text).toContain('- [x] Every task state shows')
 })
