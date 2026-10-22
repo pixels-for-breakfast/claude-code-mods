@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderChildren, RenderSurface } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderChildren, RenderSurface } from 'claude-code'
 
 import type { Spent, Task } from '../types'
 import { HANDLE_CELLS } from './task-list'
@@ -29,6 +29,29 @@ const ticked = atom({ plugin: 'session-glance', key: 'ticked' } as const, [] as 
 const spent = atom({ plugin: 'session-glance', key: 'spent' } as const, { calls: 0, input: 0, output: 0 } as Spent)
 /** The session id whose saved pane was loaded; another id means /resume, /clear or a restart moved on. */
 const restoredFor = atom({ plugin: 'session-glance', key: 'restoredFor' } as const, '')
+
+/** The person's settings (`userConfig`), set by `register` on every load; a change in the config menu reloads it. */
+const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true }
+
+/** Calls the model and adds what the call cost to the session's count, answered or not. */
+async function complete($: EngineInterface, request: Omit<ModelCompleteRequest, 'model'>): Promise<ModelCompleteResult> {
+  const reply = await $.model.complete({ ...request, model: settings.model })
+  const usage = 'usage' in reply ? reply.usage : undefined
+  if (usage !== undefined) {
+    await update($, spent, total => ({
+      calls: total.calls + 1,
+      input: total.input + usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens,
+      output: total.output + usage.output_tokens,
+    }))
+  }
+
+  return reply
+}
+
+/** Token counts as the footer shows them: 950, 1.2k, 18k. */
+export function formatTokens(count: number): string {
+  return count < 1000 ? `${count}` : count < 10_000 ? `${(count / 1000).toFixed(1)}k` : `${Math.round(count / 1000)}k`
+}
 
 /** One saved pane per session in `$.store`, plus the ids newest last, so the oldest can be dropped. */
 const SNAPSHOT_PREFIX = 'session:'
@@ -355,10 +378,12 @@ async function ask($: EngineInterface, question: string, options: string[]): Pro
 
 /** Has Haiku tidy the typed task and asks the person when it is unclear or a duplicate; undefined means cancelled. */
 async function validateTask($: EngineInterface, typed: string, others: readonly Task[]): Promise<string | undefined> {
+  if (!settings.isTaskCheck) {
+    return typed
+  }
   await update($, isValidating, () => true)
   try {
-    const reply = await $.model.complete({
-      model: 'haiku',
+    const reply = await complete($, {
       system: 'Reply with one JSON object only, no prose, no code fence.',
       prompt: validationPrompt(typed, parseSummary(await read($, summary)).goal ?? '', others),
       maxTokens: 300,
@@ -491,6 +516,35 @@ async function changeStatus($: EngineInterface, task: Task): Promise<void> {
 /** Type and spacing: two steps up the API's five sizes (caption, footnote, body, heading, title), for reading at a glance. */
 const TYPE = { text: 'heading', label: 'body', head: 'title', icon: 24, padX: 'xl', padY: 'lg' } as const
 
+/** Folds the latest exchange into the status; false when there was nothing to fold or the model gave no reply. */
+async function summarize($: EngineInterface): Promise<boolean> {
+  const answer = await read($, lastAnswer)
+  if (answer === '') {
+    return false
+  }
+  await update($, isSummarizing, () => true)
+  try {
+    const reply = await complete($, {
+      system: 'Answer only with the six labelled lines asked for: TITLE, GOAL, DONE_WHEN, DONE, NEXT, DRIFT. No other labels, no extra lines.',
+      prompt: summaryPrompt(await read($, summary), await read($, lastPrompt), answer, await read($, ticked)),
+      maxTokens: 300,
+    })
+    if (!reply.isAnswered) {
+      return false
+    }
+    const parts = splitReply(reply.text)
+    await update($, summary, () => parts.summary)
+    if (parts.title !== '') {
+      await update($, title, () => parts.title)
+    }
+
+    return true
+  } finally {
+    await update($, isSummarizing, () => false)
+    await save($)
+  }
+}
+
 /** Puts the handoff on a surface's clipboard; the result says whether it took, with the markdown either way. */
 async function copyHandoff($: EngineInterface, surface?: RenderSurface): Promise<{ isCopied: boolean; markdown: string; hasStatus: boolean }> {
   const text = await read($, summary)
@@ -541,10 +595,22 @@ async function openPane($: EngineInterface): Promise<void> {
   await update($, isPaneOpen, () => true)
 }
 
+/** `/glance <word> on|off` and the userConfig field each one sets. */
+const SWITCHES = {
+  rename: { key: 'renameSession', on: 'The status title will now rename this session at your next prompt.', off: 'Sessions keep their own title now.' },
+  auto: { key: 'autoSummary', on: 'The status updates after every answer again.', off: 'The status only changes on /glance refresh now.' },
+  check: { key: 'checkTasks', on: 'Typed tasks are checked again.', off: 'Typed tasks are added as typed now.' },
+} as const
+const MODELS = ['haiku', 'sonnet'] as const
+
 export const register: Register = (on, options) => {
+  settings.model = MODELS.find(one => one === options.summaryModel) ?? 'haiku'
+  settings.isAutoSummary = options.autoSummary !== false
+  settings.isTaskCheck = options.checkTasks !== false
+
   on('session.start', async ($, e, next) => {
     await restore($)
-    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance demo` fills in a demo, `/glance purge` clears it, `/glance rename on|off` sets session renaming)' })
+    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance rename|auto|check on|off`, `/glance model haiku|sonnet`)' })
     void openPane($)
 
     return next(e)
@@ -552,18 +618,34 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'glance' }, async ($, e) => {
     const [word, value] = e.args.trim().split(/\s+/)
-    if (word === 'rename') {
-      // The plugin's own way to its setting: `/config` has two entries in the desktop app, and a recalled line picks the wrong one.
-      const isOn = value === undefined ? options.renameSession !== true : value === 'on'
+    if (word !== undefined && word in SWITCHES) {
+      // The plugin's own way to its settings: `/config` has two entries in the desktop app, and a recalled line picks the wrong one.
+      const setting = SWITCHES[word as keyof typeof SWITCHES]
       if (value !== undefined && value !== 'on' && value !== 'off') {
-        return { text: 'Use `/glance rename on`, `/glance rename off`, or `/glance rename` to switch it.' }
+        return { text: `Use \`/glance ${word} on\`, \`/glance ${word} off\`, or \`/glance ${word}\` to switch it.` }
       }
-      const { deny } = await $.config.set({ key: 'session-glance.renameSession', value: isOn })
+      const isOn = value === undefined ? !(word === 'rename' ? options.renameSession === true : options[setting.key] !== false) : value === 'on'
+      const { deny } = await $.config.set({ key: `session-glance.${setting.key}`, value: isOn })
       if (deny !== undefined) {
         return { text: `Could not change the setting: ${deny}` }
       }
 
-      return { text: isOn ? 'The status title will now rename this session at your next prompt.' : 'Sessions keep their own title now.' }
+      return { text: isOn ? setting.on : setting.off }
+    }
+    if (word === 'model') {
+      const model = MODELS.find(one => one === value)
+      if (model === undefined) {
+        return { text: `The status uses ${settings.model}. Use \`/glance model haiku\` or \`/glance model sonnet\` to change it.` }
+      }
+      const { deny } = await $.config.set({ key: 'session-glance.summaryModel', value: model })
+      if (deny !== undefined) {
+        return { text: `Could not change the setting: ${deny}` }
+      }
+
+      return { text: `The status and task checks use ${model} from now on.` }
+    }
+    if (e.args.trim() === 'refresh') {
+      return { text: (await summarize($)) ? 'Updated the status from the last answer.' : 'Nothing to update: no answer yet, or the model gave no reply.' }
     }
     if (e.args.trim() === 'copy') {
       if ((await read($, summary)).trim() === '' && (await read($, tasks)).length === 0) {
@@ -665,22 +747,13 @@ export const register: Register = (on, options) => {
     if (e.agentId !== undefined || e.reason !== 'answer' || e.answer === '') {
       return done
     }
-    await update($, isSummarizing, () => true)
-    const reply = await $.model.complete({
-      model: 'haiku',
-      system: 'Answer only with the six labelled lines asked for: TITLE, GOAL, DONE_WHEN, DONE, NEXT, DRIFT. No other labels, no extra lines.',
-      prompt: summaryPrompt(await read($, summary), await read($, lastPrompt), e.answer, await read($, ticked)),
-      maxTokens: 300,
-    })
-    if (reply.isAnswered) {
-      const parts = splitReply(reply.text)
-      await update($, summary, () => parts.summary)
-      if (parts.title !== '') {
-        await update($, title, () => parts.title)
-      }
+    // Kept for /glance refresh; the prompt only reads the first 8000 characters.
+    await update($, lastAnswer, () => e.answer.slice(0, 8000))
+    if (settings.isAutoSummary) {
+      await summarize($)
+    } else {
+      await save($)
     }
-    await update($, isSummarizing, () => false)
-    await save($)
 
     return done
   })
@@ -773,6 +846,7 @@ export const register: Register = (on, options) => {
     const criteria = parseCriteria(fields.done_when, await read($, ticked))
     const isReached = criteria.length > 0 && criteria.every(criterion => criterion.isMet)
     const drift = driftNote(fields.drift)
+    const cost = await read($, spent)
     const busy = await read($, isSummarizing)
     const stored = managing ? await read($, draft) : await read($, tasks)
     const rows = displayRows(stored, foldedIds)
@@ -1035,6 +1109,11 @@ export const register: Register = (on, options) => {
             </Box>
           )}
         </Box>
+        {cost.calls > 0 && (
+          <Text size="footnote" color="inactive">
+            {`glance: ${cost.calls} ${cost.calls === 1 ? 'call' : 'calls'} · ${formatTokens(cost.input + cost.output)} tokens (${formatTokens(cost.output)} out) · ${settings.model}`}
+          </Text>
+        )}
       </Box>
     )
   })

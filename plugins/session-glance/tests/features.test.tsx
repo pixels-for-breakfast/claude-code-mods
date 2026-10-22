@@ -112,3 +112,65 @@ test('/glance copy puts the handoff on the clipboard, or prints it when there is
   isAvailable = false
   expect((await $.command.run({ command: 'glance', args: 'copy' } as never)).text).toContain('- [x] Every task state shows')
 })
+
+const REPLY = {
+  isAnswered: true,
+  text: 'TITLE: Ship\nGOAL: Ship it\nDONE_WHEN: [ ] Tests pass\nDONE: Tests\nNEXT: Docs\nDRIFT: none',
+  usage: { input_tokens: 1200, output_tokens: 80, cache_creation_input_tokens: 0, cache_read_input_tokens: 300 },
+} as const
+
+test('the footer counts the calls and tokens the mod spends', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const models: string[] = []
+  on('model.complete', async (_$, e) => (models.push(e.model), { value: REPLY }))
+  on('turn.complete', async () => ({ text: '' }))
+  await $.turn.complete({ answer: 'Tests pass.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await $.turn.complete({ answer: 'Docs too.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'glance: 2 calls · 3.2k tokens (160 out) · haiku' })).toBeDefined()
+  await pane.unmount()
+  expect(models).toEqual(['haiku', 'haiku'])
+})
+
+test('with autoSummary off the status waits for /glance refresh, on the chosen model', { options: { autoSummary: false, summaryModel: 'sonnet' } }, async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const models: string[] = []
+  on('model.complete', async (_$, e) => (models.push(e.model), { value: REPLY }))
+  on('turn.complete', async () => ({ text: '' }))
+  expect((await $.command.run({ command: 'glance', args: 'refresh' } as never)).text).toContain('Nothing to update')
+  await $.turn.complete({ answer: 'Tests pass.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(models).toEqual([])
+  expect((await $.command.run({ command: 'glance', args: 'refresh' } as never)).text).toBe('Updated the status from the last answer.')
+  expect(models).toEqual(['sonnet'])
+})
+
+test('with checkTasks off a typed task is added as typed, without a model call', { options: { checkTasks: false } }, async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  let calls = 0
+  on('model.complete', async () => (calls++, { value: REPLY }))
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  await pane.input({ key: 'add-task-0', text: 'fix teh bug' })
+  expect(await pane.find({ type: 'Text', text: 'fix teh bug' })).toBeDefined()
+  await pane.unmount()
+  expect(calls).toBe(0)
+})
+
+test('/glance auto, check and model set their userConfig fields', async ($, on) => {
+  const set: unknown[] = []
+  on('config.set', async (_$, e) => (set.push([e.key, e.value]), { value: e.value }))
+  await $.command.run({ command: 'glance', args: 'auto off' } as never)
+  await $.command.run({ command: 'glance', args: 'check' } as never)
+  await $.command.run({ command: 'glance', args: 'model sonnet' } as never)
+  expect((await $.command.run({ command: 'glance', args: 'model gpt' } as never)).text).toContain('The status uses haiku')
+  expect(set).toEqual([
+    ['session-glance.autoSummary', false],
+    ['session-glance.checkTasks', false],
+    ['session-glance.summaryModel', 'sonnet'],
+  ])
+})

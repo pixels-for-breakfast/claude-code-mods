@@ -14,6 +14,25 @@
       "title": "Rename the session",
       "description": "Set the session's title in the session list to the status title Haiku writes. Off keeps the app's own title.",
       "default": false
+    },
+    "autoSummary": {
+      "type": "boolean",
+      "title": "Update the status after every answer",
+      "description": "One small model call per answered turn. Off: the status only changes on /glance refresh.",
+      "default": true
+    },
+    "checkTasks": {
+      "type": "boolean",
+      "title": "Check tasks you type",
+      "description": "Have the model tidy a typed task and ask when it is unclear or a duplicate. Off adds tasks as typed.",
+      "default": true
+    },
+    "summaryModel": {
+      "type": "string",
+      "title": "Model for the status and task checks",
+      "description": "haiku is fast and cheap; sonnet writes sharper summaries at a higher cost.",
+      "options": ["haiku", "sonnet"],
+      "default": "haiku"
     }
   }
 }
