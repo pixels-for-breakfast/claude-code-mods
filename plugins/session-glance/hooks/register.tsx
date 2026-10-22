@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderChildren } from 'claude-code'
 
-import type { Task } from '../types'
+import type { Spent, Task } from '../types'
 import { HANDLE_CELLS } from './task-list'
 import { displayRows, planDrop, progress, shownStatus } from './tree'
 import type { Row, ShownStatus } from './tree'
@@ -23,6 +23,71 @@ const draft = atom({ plugin: 'session-glance', key: 'draft' } as const, [] as Ta
 const draftBaseIds = atom({ plugin: 'session-glance', key: 'draftBaseIds' } as const, [] as string[])
 const subtaskCount = atom({ plugin: 'session-glance', key: 'subtaskCount' } as const, 0)
 const folded = atom({ plugin: 'session-glance', key: 'folded' } as const, [] as string[])
+const lastAnswer = atom({ plugin: 'session-glance', key: 'lastAnswer' } as const, '')
+/** Done-when criteria the person ticked by hand, lowercased; the model cannot untick them. */
+const ticked = atom({ plugin: 'session-glance', key: 'ticked' } as const, [] as string[])
+const spent = atom({ plugin: 'session-glance', key: 'spent' } as const, { calls: 0, input: 0, output: 0 } as Spent)
+/** The session id whose saved pane was loaded; another id means /resume, /clear or a restart moved on. */
+const restoredFor = atom({ plugin: 'session-glance', key: 'restoredFor' } as const, '')
+
+/** One saved pane per session in `$.store`, plus the ids newest last, so the oldest can be dropped. */
+const SNAPSHOT_PREFIX = 'session:'
+const SNAPSHOT_INDEX = 'sessions'
+const KEEP_SESSIONS = 30
+
+export type Snapshot = { summary: string; title: string; tasks: Task[]; folded: string[]; ticked: string[]; spent: Spent }
+
+/** Saves what the pane shows under this session's id, so /resume and a restart bring it back. */
+async function save($: EngineInterface): Promise<void> {
+  try {
+    const id = await $.session.id()
+    // Only the session whose pane is loaded writes; right after /clear the old one's state is still here.
+    if (id !== (await read($, restoredFor))) {
+      return
+    }
+    const snapshot: Snapshot = {
+      summary: await read($, summary),
+      title: await read($, title),
+      tasks: await read($, tasks),
+      folded: await read($, folded),
+      ticked: await read($, ticked),
+      spent: await read($, spent),
+    }
+    await $.store.set(`${SNAPSHOT_PREFIX}${id}`, snapshot)
+    const ids = [...(((await $.store.get(SNAPSHOT_INDEX)) as string[] | undefined) ?? []).filter(one => one !== id), id]
+    for (const old of ids.slice(0, -KEEP_SESSIONS)) {
+      await $.store.delete(`${SNAPSHOT_PREFIX}${old}`)
+    }
+    await $.store.set(SNAPSHOT_INDEX, ids.slice(-KEEP_SESSIONS))
+  } catch {
+    // The pane still works; this session just will not come back after a restart.
+  }
+}
+
+/** Loads this session's saved pane once per session id: /resume and a restart bring it back, /clear starts empty. */
+async function restore($: EngineInterface): Promise<void> {
+  try {
+    const id = await $.session.id()
+    const previous = await read($, restoredFor)
+    if (previous === id) {
+      return
+    }
+    const saved = (await $.store.get(`${SNAPSHOT_PREFIX}${id}`)) as Partial<Snapshot> | undefined
+    // A first load with nothing saved keeps what is here (an install or upgrade mid-session).
+    if (saved !== undefined || previous !== '') {
+      await update($, summary, () => saved?.summary ?? '')
+      await update($, title, () => saved?.title ?? '')
+      await update($, tasks, () => saved?.tasks ?? [])
+      await update($, folded, () => saved?.folded ?? [])
+      await update($, ticked, () => saved?.ticked ?? [])
+      await update($, spent, () => saved?.spent ?? { calls: 0, input: 0, output: 0 })
+      await update($, lastAnswer, () => '')
+    }
+    await update($, restoredFor, () => id)
+  } catch {
+    // Nothing saved could be read: the pane starts from what it holds.
+  }
+}
 
 /** The status fields, each label in a theme colour for what it means, so the card reads at a glance in light and dark. */
 const FIELDS = [
@@ -104,6 +169,14 @@ export function parseSummary(text: string): Record<string, string> {
   }
 
   return Object.keys(fields).length === 0 && text.trim() !== '' ? { goal: text.trim() } : fields
+}
+
+/** What a compaction is told to keep: the goal and its done-when, word for word; empty with neither. */
+export function compactNote(text: string): string {
+  const fields = parseSummary(text)
+  const lines = [fields.goal ? `Goal: ${fields.goal}` : '', fields.done_when ? `Done when: ${fields.done_when}` : ''].filter(line => line !== '')
+
+  return lines.length === 0 ? '' : `Keep the session's goal in the summary, word for word. ${lines.join('. ')}.`
 }
 
 /** Builds the rolling-summary prompt: the previous status is folded together with the latest exchange. */
@@ -263,6 +336,7 @@ async function addTask($: EngineInterface, typed: string): Promise<void> {
   }
   await update($, tasks, list => [...list, { id: `user-${crypto.randomUUID().slice(0, 8)}`, subject, status: 'pending' as const }])
   await tellModel($, `The user added the task "${subject}" to the session checklist.`)
+  await save($)
 }
 
 /** Renames a task in the edit draft, after Haiku's check; saved or dropped with the draft. */
@@ -317,6 +391,7 @@ async function stopEditing($: EngineInterface, isSaved: boolean): Promise<void> 
     if (change !== '') {
       await tellModel($, change)
     }
+    await save($)
   }
   await update($, isManaging, () => false)
   await update($, selectedId, () => '')
@@ -355,6 +430,7 @@ async function changeStatus($: EngineInterface, task: Task): Promise<void> {
   const sync = task.id.startsWith('demo-') || task.id.startsWith('user-') ? '' : ` If it is in your task list (id ${task.id}), update it to match.`
   const carried = isCarried ? `, and with it its ${children.length} subtasks` : ''
   await tellModel($, `The user marked the task "${task.subject}" as ${STATUS_WORDS[choice.status]}${carried} in the session pane.${sync}`)
+  await save($)
 }
 
 /** Type and spacing: two steps up the API's five sizes (caption, footnote, body, heading, title), for reading at a glance. */
@@ -377,6 +453,7 @@ async function purge($: EngineInterface): Promise<boolean> {
   if (hadTasks) {
     await tellModel($, 'The user cleared the session checklist; its tasks no longer apply unless they bring them up again.')
   }
+  await save($)
 
   return true
 }
@@ -388,6 +465,7 @@ async function openPane($: EngineInterface): Promise<void> {
 
 export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
+    await restore($)
     await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance demo` fills in a demo, `/glance purge` clears it, `/glance rename on|off` sets session renaming)' })
     void openPane($)
 
@@ -417,6 +495,7 @@ export const register: Register = (on, options) => {
       await update($, summary, () => DEMO_SUMMARY)
       await update($, title, () => DEMO_TITLE)
       await update($, folded, () => DEMO_FOLDED)
+      await save($)
       await openPane($)
 
       return { text: `Seeded the demo: a status and ${DEMO_TASKS.length} tasks in every state.` }
@@ -440,6 +519,8 @@ export const register: Register = (on, options) => {
   }).catch(($, e, next) => next(e))
 
   on('prompt.submit', async ($, e, next) => {
+    // An in-process /resume or /clear starts no session.start, so the id is checked here too.
+    await restore($)
     await update($, lastPrompt, () => e.text)
 
     return next(e)
@@ -509,9 +590,26 @@ export const register: Register = (on, options) => {
       }
     }
     await update($, isSummarizing, () => false)
+    await save($)
 
     return done
   })
+
+  on('session.end', async ($, e, next) => {
+    await save($)
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  // The pane keeps its own state through a compaction; this keeps the goal in the agent's summary too.
+  on('session.compact', async ($, e, next) => {
+    const keep = compactNote(await read($, summary))
+    if (e.agentId !== undefined || keep === '') {
+      return next(e)
+    }
+
+    return next({ ...e, instructions: e.instructions ? `${e.instructions}\n\n${keep}` : keep })
+  }).catch(($, e, next) => next(e))
 
   on('ui.message', async ($, e, next) => {
     if (e.element !== 'edit-overlay') {
