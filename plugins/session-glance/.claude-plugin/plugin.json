@@ -15,6 +15,12 @@
       "description": "Set the session's title in the session list to the status title Haiku writes. Off keeps the app's own title.",
       "default": false
     },
+    "suggestTitle": {
+      "type": "boolean",
+      "title": "Suggest a new title when the work moves on",
+      "description": "While Rename the session is off: when the session's work as a whole has moved away from its title, the pane suggests a fitting one to use or dismiss.",
+      "default": true
+    },
     "autoSummary": {
       "type": "boolean",
       "title": "Update the status after every answer",

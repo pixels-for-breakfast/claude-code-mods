@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria } from '../hooks/register'
+import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, suggestionFrom, summaryPrompt } from '../hooks/register'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
@@ -173,4 +173,79 @@ test('/glance auto, check and model set their userConfig fields', async ($, on) 
     ['session-glance.checkTasks', false],
     ['session-glance.summaryModel', 'sonnet'],
   ])
+})
+
+test('suggestionFrom offers only a real change of title', () => {
+  expect(suggestionFrom('none', 'Build the pane', [])).toBe('')
+  expect(suggestionFrom('build the pane', 'Build the pane', [])).toBe('')
+  expect(suggestionFrom('"Fix the deploy"', 'Build the pane', [])).toBe('Fix the deploy')
+  expect(suggestionFrom('Fix the deploy', 'Build the pane', ['fix the deploy'])).toBe('')
+  expect(summaryPrompt('', 'hi', 'hello')).not.toContain('RETITLE')
+  expect(summaryPrompt('', 'hi', 'hello', [], 'Build the pane')).toContain('the title "Build the pane"')
+})
+
+const turn = (answer: string, id: string) => ({ answer, durationMs: 1, isAborted: false, turnId: id, reason: 'answer' as const })
+const reply = (retitle: string) => ({
+  value: {
+    isAnswered: true as const,
+    text: `TITLE: Build the pane\nGOAL: Build it\nDONE_WHEN: [ ] Pane shows\nDONE: x\nNEXT: y\nDRIFT: none\nRETITLE: ${retitle}`,
+    usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+  },
+})
+
+test('a title suggestion can be used once at the next prompt, or dismissed for good', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('turn.complete', async () => ({ text: '' }))
+  on('classic.UserPromptSubmit', async () => ({}))
+  const prompts: string[] = []
+  on('model.complete', async (_$, e) => {
+    prompts.push(typeof e.prompt === 'string' ? e.prompt : '')
+
+    return reply(prompts.length === 1 ? 'none' : 'Fix the deploy pipeline')
+  })
+
+  await $.turn.complete(turn('Started on the pane.', 't1'))
+  expect(prompts[0]).not.toContain('RETITLE')
+  await $.turn.complete(turn('Now the deploy broke.', 't2'))
+  expect(prompts[1]).toContain('the title "Build the pane"')
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'Fix the deploy pipeline' })).toBeDefined()
+
+  await pane.press({ key: 'dismiss-title' })
+  expect(await pane.find({ type: 'Text', text: 'Fix the deploy pipeline' })).toBeUndefined()
+  await $.turn.complete(turn('Still the deploy.', 't3'))
+  expect(await pane.find({ type: 'Text', text: 'Fix the deploy pipeline' })).toBeUndefined()
+  await pane.unmount()
+  expect((await $.classic.UserPromptSubmit({ prompt: 'next' } as never)).sessionTitle).toBeUndefined()
+})
+
+test('using a suggestion renames the session once, with renaming itself off', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('turn.complete', async () => ({ text: '' }))
+  on('classic.UserPromptSubmit', async () => ({}))
+  let calls = 0
+  on('model.complete', async () => reply(++calls === 1 ? 'none' : 'Fix the deploy pipeline'))
+  await $.turn.complete(turn('Started on the pane.', 't1'))
+  await $.turn.complete(turn('Now the deploy broke.', 't2'))
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  await pane.press({ key: 'use-title' })
+  expect(await pane.find({ type: 'Text', text: /Renames the session to "Fix the deploy pipeline"/ })).toBeDefined()
+  await pane.unmount()
+  expect((await $.classic.UserPromptSubmit({ prompt: 'next' } as never)).sessionTitle).toBe('Fix the deploy pipeline')
+  expect((await $.classic.UserPromptSubmit({ prompt: 'again' } as never)).sessionTitle).toBeUndefined()
+})
+
+test('with renaming on, no title is suggested', { options: { renameSession: true } }, async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('turn.complete', async () => ({ text: '' }))
+  const prompts: string[] = []
+  on('model.complete', async (_$, e) => (prompts.push(typeof e.prompt === 'string' ? e.prompt : ''), reply('none')))
+  await $.turn.complete(turn('One.', 't1'))
+  await $.turn.complete(turn('Two.', 't2'))
+  expect(prompts.some(prompt => prompt.includes('RETITLE'))).toBe(false)
 })

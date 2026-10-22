@@ -27,6 +27,10 @@ declare module 'claude-code' {
       ticked: string[]
       spent: Spent
       restoredFor: string
+      titleAnchor: string
+      titleSuggestion: string
+      pendingTitle: string
+      dismissedTitles: string[]
     }
   }
 }

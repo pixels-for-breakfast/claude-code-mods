@@ -29,9 +29,16 @@ const ticked = atom({ plugin: 'session-glance', key: 'ticked' } as const, [] as 
 const spent = atom({ plugin: 'session-glance', key: 'spent' } as const, { calls: 0, input: 0, output: 0 } as Spent)
 /** The session id whose saved pane was loaded; another id means /resume, /clear or a restart moved on. */
 const restoredFor = atom({ plugin: 'session-glance', key: 'restoredFor' } as const, '')
+/** The title the session is known by: the first status title, or a suggestion the person used. */
+const titleAnchor = atom({ plugin: 'session-glance', key: 'titleAnchor' } as const, '')
+const titleSuggestion = atom({ plugin: 'session-glance', key: 'titleSuggestion' } as const, '')
+/** A title the person chose, set as the session title at their next prompt (the only time the host takes one). */
+const pendingTitle = atom({ plugin: 'session-glance', key: 'pendingTitle' } as const, '')
+/** Suggestions the person dismissed, lowercased, so the same one is not offered again. */
+const dismissedTitles = atom({ plugin: 'session-glance', key: 'dismissedTitles' } as const, [] as string[])
 
 /** The person's settings (`userConfig`), set by `register` on every load; a change in the config menu reloads it. */
-const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true }
+const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true, isTitleSuggest: true }
 
 /** Calls the model and adds what the call cost to the session's count, answered or not. */
 async function complete($: EngineInterface, request: Omit<ModelCompleteRequest, 'model'>): Promise<ModelCompleteResult> {
@@ -58,7 +65,17 @@ const SNAPSHOT_PREFIX = 'session:'
 const SNAPSHOT_INDEX = 'sessions'
 const KEEP_SESSIONS = 30
 
-export type Snapshot = { summary: string; title: string; tasks: Task[]; folded: string[]; ticked: string[]; spent: Spent }
+export type Snapshot = {
+  summary: string
+  title: string
+  tasks: Task[]
+  folded: string[]
+  ticked: string[]
+  spent: Spent
+  titleAnchor: string
+  titleSuggestion: string
+  dismissedTitles: string[]
+}
 
 /** Saves what the pane shows under this session's id, so /resume and a restart bring it back. */
 async function save($: EngineInterface): Promise<void> {
@@ -75,6 +92,9 @@ async function save($: EngineInterface): Promise<void> {
       folded: await read($, folded),
       ticked: await read($, ticked),
       spent: await read($, spent),
+      titleAnchor: await read($, titleAnchor),
+      titleSuggestion: await read($, titleSuggestion),
+      dismissedTitles: await read($, dismissedTitles),
     }
     await $.store.set(`${SNAPSHOT_PREFIX}${id}`, snapshot)
     const ids = [...(((await $.store.get(SNAPSHOT_INDEX)) as string[] | undefined) ?? []).filter(one => one !== id), id]
@@ -104,6 +124,10 @@ async function restore($: EngineInterface): Promise<void> {
       await update($, folded, () => saved?.folded ?? [])
       await update($, ticked, () => saved?.ticked ?? [])
       await update($, spent, () => saved?.spent ?? { calls: 0, input: 0, output: 0 })
+      await update($, titleAnchor, () => saved?.titleAnchor ?? '')
+      await update($, titleSuggestion, () => saved?.titleSuggestion ?? '')
+      await update($, dismissedTitles, () => saved?.dismissedTitles ?? [])
+      await update($, pendingTitle, () => '')
       await update($, lastAnswer, () => '')
     }
     await update($, restoredFor, () => id)
@@ -185,7 +209,7 @@ export function splitReply(reply: string): { title: string; summary: string } {
 export function parseSummary(text: string): Record<string, string> {
   const fields: Record<string, string> = {}
   for (const line of text.split('\n')) {
-    const match = line.match(/^\s*[-*]?\s*(goal|done[\s_-]*when|done|next|drift)\s*:\s*(.+)$/i)
+    const match = line.match(/^\s*[-*]?\s*(goal|done[\s_-]*when|done|next|drift|retitle)\s*:\s*(.+)$/i)
     if (match?.[1] && match[2]) {
       fields[match[1].toLowerCase().replace(/[\s-]+/g, '_')] = match[2].trim()
     }
@@ -221,6 +245,13 @@ export function formatCriteria(criteria: readonly Criterion[]): string {
   return criteria.map(criterion => `[${criterion.isMet ? 'x' : ' '}] ${criterion.text}`).join('; ')
 }
 
+/** A RETITLE line worth offering: not "none", not the title the session already has, not one the person dismissed. */
+export function suggestionFrom(retitle: string | undefined, anchor: string, dismissed: readonly string[]): string {
+  const suggestion = driftNote(retitle).replace(/^["']|["']$/g, '').slice(0, 80)
+
+  return suggestion === '' || suggestion.toLowerCase() === anchor.toLowerCase() || dismissed.includes(suggestion.toLowerCase()) ? '' : suggestion
+}
+
 /** The drift line to show, or empty when the turn served the goal. */
 export function driftNote(drift: string | undefined): string {
   return drift === undefined || /^(none|no|n\/a|-)?\.?$/i.test(drift.trim()) ? '' : drift.trim()
@@ -253,18 +284,23 @@ export function compactNote(text: string): string {
 }
 
 /** Builds the rolling-summary prompt: the previous status is folded together with the latest exchange. */
-export function summaryPrompt(previous: string, prompt: string, answer: string, tickedKeys: readonly string[] = []): string {
+export function summaryPrompt(previous: string, prompt: string, answer: string, tickedKeys: readonly string[] = [], titleToCheck = ''): string {
   const fields = parseSummary(previous)
   const doneWhen = formatCriteria(parseCriteria(fields.done_when, tickedKeys))
 
   return [
-    'You keep a glanceable status of a coding session. Reply with exactly these six lines and nothing else:',
+    `You keep a glanceable status of a coding session. Reply with exactly these ${titleToCheck === '' ? 'six' : 'seven'} lines and nothing else:`,
     'TITLE: <session title, max 6 words>',
     'GOAL: <what the user is after, max 12 words>',
     'DONE_WHEN: <1-4 checkable criteria that mean the goal is reached, max 8 words each, separated by "; ", each starting [x] when met, else [ ]>',
     'DONE: <what was just finished, max 12 words>',
     'NEXT: <the next step or open question, max 12 words>',
     'DRIFT: <when the latest exchange did not serve GOAL, what happened instead, max 10 words; else none>',
+    ...(titleToCheck === ''
+      ? []
+      : [
+          `RETITLE: <only when the session's work as a whole has moved away from what the title "${titleToCheck}" describes (a detour of one exchange is not enough): a title that fits it now, max 6 words; else none>`,
+        ]),
     'Keep criteria that still apply word for word; a criterion marked [x] in the previous status stays [x]. A new goal gets new criteria.',
     'Terse fragments, no full sentences, no markdown, no repetition between lines.',
     `<previous_status>${previous ? FIELDS.map(field => `${field.key.toUpperCase()}: ${(field.key === 'done_when' ? doneWhen : fields[field.key]) ?? ''}`).join('\n') : '(none yet)'}</previous_status>`,
@@ -523,10 +559,11 @@ async function summarize($: EngineInterface): Promise<boolean> {
     return false
   }
   await update($, isSummarizing, () => true)
+  const anchor = await read($, titleAnchor)
   try {
     const reply = await complete($, {
-      system: 'Answer only with the six labelled lines asked for: TITLE, GOAL, DONE_WHEN, DONE, NEXT, DRIFT. No other labels, no extra lines.',
-      prompt: summaryPrompt(await read($, summary), await read($, lastPrompt), answer, await read($, ticked)),
+      system: 'Answer only with the labelled lines asked for (TITLE, GOAL, DONE_WHEN, DONE, NEXT, DRIFT, and RETITLE when asked). No other labels, no extra lines.',
+      prompt: summaryPrompt(await read($, summary), await read($, lastPrompt), answer, await read($, ticked), settings.isTitleSuggest ? anchor : ''),
       maxTokens: 300,
     })
     if (!reply.isAnswered) {
@@ -537,12 +574,39 @@ async function summarize($: EngineInterface): Promise<boolean> {
     if (parts.title !== '') {
       await update($, title, () => parts.title)
     }
+    if (anchor === '' && parts.title !== '') {
+      await update($, titleAnchor, () => parts.title)
+    }
+    const suggestion = settings.isTitleSuggest ? suggestionFrom(parseSummary(parts.summary).retitle, anchor, await read($, dismissedTitles)) : ''
+    if (suggestion !== '' && suggestion !== (await read($, titleSuggestion))) {
+      await update($, titleSuggestion, () => suggestion)
+      $.ui.toast(`Title suggestion: ${suggestion}`)
+    }
 
     return true
   } finally {
     await update($, isSummarizing, () => false)
     await save($)
   }
+}
+
+/** Takes the suggested title: it becomes the session title at the next prompt and the title later suggestions are measured against. */
+async function useSuggestion($: EngineInterface): Promise<void> {
+  const suggestion = await read($, titleSuggestion)
+  if (suggestion === '') {
+    return
+  }
+  await update($, pendingTitle, () => suggestion)
+  await update($, titleAnchor, () => suggestion)
+  await update($, titleSuggestion, () => '')
+  await save($)
+}
+
+async function dismissSuggestion($: EngineInterface): Promise<void> {
+  const suggestion = await read($, titleSuggestion)
+  await update($, dismissedTitles, list => [...list, suggestion.toLowerCase()].slice(-20))
+  await update($, titleSuggestion, () => '')
+  await save($)
 }
 
 /** Puts the handoff on a surface's clipboard; the result says whether it took, with the markdown either way. */
@@ -579,6 +643,9 @@ async function purge($: EngineInterface): Promise<boolean> {
   await update($, title, () => '')
   await update($, folded, () => [])
   await update($, ticked, () => [])
+  await update($, titleAnchor, () => '')
+  await update($, titleSuggestion, () => '')
+  await update($, dismissedTitles, () => [])
   await update($, draft, () => [])
   await update($, selectedId, () => '')
   await update($, isManaging, () => false)
@@ -600,6 +667,11 @@ const SWITCHES = {
   rename: { key: 'renameSession', on: 'The status title will now rename this session at your next prompt.', off: 'Sessions keep their own title now.' },
   auto: { key: 'autoSummary', on: 'The status updates after every answer again.', off: 'The status only changes on /glance refresh now.' },
   check: { key: 'checkTasks', on: 'Typed tasks are checked again.', off: 'Typed tasks are added as typed now.' },
+  suggest: {
+    key: 'suggestTitle',
+    on: 'A new title is suggested when the work moves away from the session title (while renaming is off).',
+    off: 'No more title suggestions.',
+  },
 } as const
 const MODELS = ['haiku', 'sonnet'] as const
 
@@ -607,10 +679,12 @@ export const register: Register = (on, options) => {
   settings.model = MODELS.find(one => one === options.summaryModel) ?? 'haiku'
   settings.isAutoSummary = options.autoSummary !== false
   settings.isTaskCheck = options.checkTasks !== false
+  // With renaming on the title already follows the work, so there is nothing to suggest.
+  settings.isTitleSuggest = options.suggestTitle !== false && options.renameSession !== true
 
   on('session.start', async ($, e, next) => {
     await restore($)
-    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance rename|auto|check on|off`, `/glance model haiku|sonnet`)' })
+    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance rename|suggest|auto|check on|off`, `/glance model haiku|sonnet`)' })
     void openPane($)
 
     return next(e)
@@ -667,6 +741,7 @@ export const register: Register = (on, options) => {
       await update($, title, () => DEMO_TITLE)
       await update($, folded, () => DEMO_FOLDED)
       await update($, ticked, () => [])
+      await update($, titleAnchor, () => DEMO_TITLE)
       await save($)
       await openPane($)
 
@@ -702,6 +777,12 @@ export const register: Register = (on, options) => {
   // The host only takes a new session title at a prompt, so it trails the summary by one turn.
   on('classic.UserPromptSubmit', async ($, e, next) => {
     const result = await next(e)
+    const chosen = await read($, pendingTitle)
+    if (chosen !== '') {
+      await update($, pendingTitle, () => '')
+
+      return { ...result, sessionTitle: chosen }
+    }
     if (options.renameSession !== true) {
       return result
     }
@@ -847,6 +928,8 @@ export const register: Register = (on, options) => {
     const isReached = criteria.length > 0 && criteria.every(criterion => criterion.isMet)
     const drift = driftNote(fields.drift)
     const cost = await read($, spent)
+    const suggestion = await read($, titleSuggestion)
+    const chosenTitle = await read($, pendingTitle)
     const busy = await read($, isSummarizing)
     const stored = managing ? await read($, draft) : await read($, tasks)
     const rows = displayRows(stored, foldedIds)
@@ -980,6 +1063,27 @@ export const register: Register = (on, options) => {
             </Box>,
             () => update($, isSummaryOpen, open => !open),
           )}
+          {suggestion !== '' && (
+            <Box flexDirection="column" gap="xs" marginBottom={airy}>
+              <Text size={type.label} color="suggestion">
+                Title suggestion
+              </Text>
+              <Text size={type.text}>{suggestion}</Text>
+              <Box gap="md" alignItems="center">
+                <Button key="use-title" plain onPress={() => useSuggestion($)}>
+                  <Text size={type.text} color="claude" weight="medium">
+                    Use
+                  </Text>
+                </Button>
+                <Button key="dismiss-title" plain onPress={() => dismissSuggestion($)}>
+                  <Text size={type.text} color="subtle">
+                    Dismiss
+                  </Text>
+                </Button>
+              </Box>
+            </Box>
+          )}
+          {chosenTitle !== '' && note(`Renames the session to "${chosenTitle}" at your next prompt.`)}
           {showSummary && !hasSummary && (
             <Text size={type.text} color="inactive">
               Appears after the first answer.
