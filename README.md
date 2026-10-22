@@ -54,6 +54,10 @@ claude plugin validate plugins/<mod>
 claude plugin test plugins/<mod>
 ```
 
+## Bugs and ideas
+
+Open an [issue](https://github.com/pixels-for-breakfast/claude-code-mods/issues/new/choose): the bug report asks for the mod and Claude Code versions and where you saw it; the feature request is for ideas for a mod, or for a new one.
+
 ## Licence
 
 MIT, see [LICENSE](LICENSE).

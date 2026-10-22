@@ -1,0 +1,30 @@
+name: Feature request
+description: An idea for a mod, or for a new one.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: mod
+    attributes:
+      label: Mod
+      options:
+        - session-glance
+        - A new mod
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What gets in your way now
+      description: The situation in a session where you miss this.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like it to do
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What you do instead today

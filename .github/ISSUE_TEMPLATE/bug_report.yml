@@ -1,0 +1,59 @@
+name: Bug report
+description: A mod does something wrong, or nothing at all.
+labels: [bug]
+body:
+  - type: dropdown
+    id: mod
+    attributes:
+      label: Mod
+      options:
+        - session-glance
+    validations:
+      required: true
+  - type: input
+    id: mod-version
+    attributes:
+      label: Mod version
+      description: The `version` in the mod's `plugin.json`, or what `/plugin` lists.
+      placeholder: 0.2.0
+    validations:
+      required: true
+  - type: input
+    id: claude-code-version
+    attributes:
+      label: Claude Code version
+      description: The output of `claude --version`.
+      placeholder: 2.1.308
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where you saw it
+      options:
+        - Terminal
+        - Desktop app
+        - VS Code
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Start a session and run `/glance demo`
+        2. …
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected, and what happened instead
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Screenshot or error line
+      description: A screenshot of the pane, or the dim line the transcript shows when a hook fails. Leave out anything from your own code or conversations you can't share.
