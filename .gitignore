@@ -1,0 +1,8 @@
+.DS_Store
+*~
+*.swp
+*.log
+node_modules/
+.mcpb-cache/
+# Written by the Claude Code engine when a mod loads
+**/.claude-plugin/types/

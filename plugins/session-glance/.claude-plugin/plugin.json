@@ -1,0 +1,19 @@
+{
+  "name": "session-glance",
+  "version": "0.1.0",
+  "description": "Sidebar pane with a rolling summary of the session and a checklist of its tasks",
+  "author": {
+    "name": "Pixels for Breakfast",
+    "url": "https://pixelsforbreakfast.nl"
+  },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "renameSession": {
+      "type": "boolean",
+      "title": "Rename the session",
+      "description": "Set the session's title in the session list to the status title Haiku writes. Off keeps the app's own title.",
+      "default": false
+    }
+  }
+}

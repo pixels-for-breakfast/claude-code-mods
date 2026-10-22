@@ -1,0 +1,12 @@
+{
+  "name": "pixelsforbreakfast",
+  "owner": { "name": "Pixels for Breakfast", "url": "https://pixelsforbreakfast.nl" },
+  "description": "Claude Code mods by Pixels for Breakfast",
+  "plugins": [
+    {
+      "name": "session-glance",
+      "source": "./plugins/session-glance",
+      "description": "Sidebar pane with a rolling summary of the session and a checklist of its tasks"
+    }
+  ]
+}
