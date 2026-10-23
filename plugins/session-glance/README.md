@@ -26,6 +26,8 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
 
 The pane opens at the start of a session. Toggle it with `/glance`, or with the **Show status / Hide status** button above the prompt (`g` in the terminal).
 
+When a turn ends and the next step is yours, the band says so in the accent colour: **● your move: push develop**, or **● your move: answer the question** when the answer ends on one. It shows only between turns and goes away at your next prompt, so you can see it without opening the pane.
+
 While text is selected on screen, **+ Task** and **+ To-do** appear beside that button: they add the selection as a task for the agent or as a to-do of your own, through the usual task check. The selection is checked a few times a second, because Claude Code raises no event when it changes; where a surface does not report its selection, the buttons stay hidden.
 
 | Command | What it does |

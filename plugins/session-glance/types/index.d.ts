@@ -43,6 +43,7 @@ declare module 'claude-code' {
       editingOwner: Owner
       isHelpOpen: boolean
       carryOffer: Task[]
+      yourMove: string
     }
   }
 }

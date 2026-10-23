@@ -102,3 +102,17 @@ export function formatTokens(count: number): string {
 export function selectionTask(text: string | undefined): string {
   return (text ?? '').replace(/\s+/g, ' ').trim().slice(0, 500)
 }
+
+/**
+ * What the person is waiting to do after a turn: the status model's YOUR_MOVE when it names one,
+ * else "answer the question" when the answer ends on one; empty when the agent can go on alone.
+ */
+export function yourMoveFrom(answer: string, yourMove: string | undefined): string {
+  const move = driftNote(yourMove)
+  if (move !== '') {
+    return move
+  }
+  const lastLine = answer.trim().split('\n').filter(line => line.trim() !== '').pop() ?? ''
+
+  return /\?\s*\**\s*$/.test(lastLine) ? 'answer the question' : ''
+}

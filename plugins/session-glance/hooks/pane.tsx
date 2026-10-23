@@ -519,13 +519,13 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
 }
 
 /** What the band above the prompt draws. */
-export type BandView = { isTerminal: boolean; isOpen: boolean; title: string; done: number; total: number; openForYou: number; isSelected: boolean }
+export type BandView = { isTerminal: boolean; isOpen: boolean; title: string; done: number; total: number; openForYou: number; isSelected: boolean; yourMove: string }
 export type BandActions = { togglePane: () => unknown; addSelection: (owner: Owner) => unknown }
 
 /** The band above the prompt: the pane toggle, the selection buttons and a one-line status. */
 export function drawBand(table: ElementTable, view: BandView, act: BandActions): RenderElement {
   const { Box, Button, Text } = table
-  const { isOpen, done, total, openForYou, isSelected } = view
+  const { isOpen, done, total, openForYou, isSelected, yourMove } = view
   const current = view.title
 
   return (
@@ -548,6 +548,11 @@ export function drawBand(table: ElementTable, view: BandView, act: BandActions):
             + To-do
           </Text>
         </Button>
+      )}
+      {yourMove !== '' && (
+        <Text size="footnote" color="claude" weight="medium" wrap="truncate-end">
+          {`● your move: ${yourMove}`}
+        </Text>
       )}
       <Text size="footnote" color="inactive" wrap="truncate-end">
         {current || 'No status yet'}

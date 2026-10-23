@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { infoIcon } from '../hooks/icons'
 import { summaryPrompt } from '../hooks/prompts'
-import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom } from '../hooks/status'
+import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, yourMoveFrom } from '../hooks/status'
 import { activeOf, describeChanges, moveTask, openTodos, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
@@ -517,4 +517,35 @@ test('no offer in a project without an earlier session, or in a session that was
   await $.prompt.submit({ text: 'back' } as never)
   expect(await pane.find({ type: 'Text', text: /from your last session/ })).toBeUndefined()
   await pane.unmount()
+})
+
+test('yourMoveFrom takes the status line, else a closing question', () => {
+  expect(yourMoveFrom('Done.', 'Push the branch')).toBe('Push the branch')
+  expect(yourMoveFrom('All set.\n\nShall I merge it?', 'none')).toBe('answer the question')
+  expect(yourMoveFrom('Is it fine? Yes, it is.', undefined)).toBe('')
+})
+
+test('the band says it is your move between turns, and drops it at your next prompt', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('turn.complete', async () => ({ text: '' }))
+  on('prompt.submit', async (_$, e) => ({ text: e.text }))
+  on('model.complete', async () => ({
+    value: {
+      isAnswered: true as const,
+      text: 'TITLE: Ship\nGOAL: Ship it\nDONE_WHEN: [ ] Pushed\nDONE: Committed\nNEXT: Push\nDRIFT: none\nYOUR_MOVE: Push develop',
+      usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    },
+  }))
+  await $.turn.complete(turn('Committed; push when ready.', 't1'))
+  const idle = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
+  expect(await idle.find({ type: 'Text', text: '● your move: Push develop' })).toBeDefined()
+  await idle.unmount()
+  const working = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'AbovePrompt', props: { ...BAND, isWorking: true } as never })
+  expect(await working.find({ type: 'Text', text: /your move/ })).toBeUndefined()
+  await working.unmount()
+  await $.prompt.submit({ text: 'pushed' } as never)
+  const after = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
+  expect(await after.find({ type: 'Text', text: /your move/ })).toBeUndefined()
+  await after.unmount()
 })

@@ -8,7 +8,7 @@ import type { BandView, PaneView } from './pane'
 import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './prompts'
 import { MODELS, SWITCHES, isSwitchOn, modelOf } from './settings'
 import type { Criterion } from './status'
-import { compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom } from './status'
+import { compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom, yourMoveFrom } from './status'
 import { activeOf, describeChanges, mergeDraft, moveTask, openTodos, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
 
 const PANE = 'session-glance'
@@ -57,6 +57,8 @@ const openArchives = atom({ plugin: 'session-glance', key: 'openArchives' } as c
 const isSettingsOpen = atom({ plugin: 'session-glance', key: 'isSettingsOpen' } as const, false)
 /** Open to-dos from the last session in this project, offered once when a new session starts. */
 const carryOffer = atom({ plugin: 'session-glance', key: 'carryOffer' } as const, [] as Task[])
+/** What the person is waiting to do after the last turn, shown in the band until their next prompt. */
+const yourMove = atom({ plugin: 'session-glance', key: 'yourMove' } as const, '')
 /** How often the selection is checked for the band's buttons. */
 const SELECTION_POLL_MS = 400
 
@@ -708,6 +710,7 @@ export const register: Register = (on, options) => {
     // An in-process /resume or /clear starts no session.start, so the id is checked here too.
     await restore($)
     await update($, lastPrompt, () => e.text)
+    await update($, yourMove, () => '')
 
     return next(e)
   }).catch(($, e, next) => next(e))
@@ -772,6 +775,9 @@ export const register: Register = (on, options) => {
     } else {
       await save($)
     }
+    // Without a fresh status only the answer itself can say it ends on a question.
+    const move = settings.isAutoSummary ? parseSummary(await read($, summary)).your_move : undefined
+    await update($, yourMove, () => yourMoveFrom(e.answer, move))
 
     return done
   })
@@ -834,6 +840,8 @@ export const register: Register = (on, options) => {
       total,
       openForYou: mineOpen.total - mineOpen.done,
       isSelected: await read($, hasSelection),
+      // Shown only between turns: while the agent works, it is not the person's move.
+      yourMove: e.props.isWorking ? '' : await read($, yourMove),
     }
 
     return drawBand($.ui.resolve(e), view, {
