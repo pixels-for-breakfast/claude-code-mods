@@ -87,9 +87,13 @@ claude plugin validate plugins/session-glance
 claude plugin test plugins/session-glance
 ```
 
-- `hooks/register.tsx`: the hooks, the commands and the pane.
-- `hooks/tree.ts`: the pure task logic (display order, progress, drag-and-drop), tested on its own.
+- `hooks/register.tsx`: the state, the actions that change it, and the events (the engine's scan only accepts state that is read and written in the file that defines it).
+- `hooks/pane.tsx`: the pane and the band, drawn from plain data and a set of actions; no state.
+- `hooks/status.ts`: reading the status the model writes (fields, criteria, drift, suggestions) and the markdown handoff.
+- `hooks/prompts.ts`: the prompts for the status and the task check, and reading their replies.
+- `hooks/tree.ts`: the pure task logic (display order, progress, drag-and-drop, owners, archive, what an edit changed).
 - `hooks/task-list.tsx`: the drag layer of Edit mode.
+- `hooks/icons.ts`, `hooks/settings.ts`, `hooks/demo.ts`: pictures, the settings table, the demo.
 - `types/index.d.ts`: the state contract.
 - `tests/`: `glance.test.tsx` (pane and band), `manage.test.tsx` (Edit mode), `features.test.tsx` (persistence, criteria, copy, settings, title suggestions).
 

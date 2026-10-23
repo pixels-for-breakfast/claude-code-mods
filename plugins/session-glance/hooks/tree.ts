@@ -180,3 +180,55 @@ export function setArchived(all: readonly Task[], id: string, isArchived: boolea
     return isArchived ? { ...rest, archived: true } : rest
   })
 }
+
+/** Puts a list in the order of `ids`; tasks the ids do not name keep their place at the end. */
+export function reorder(list: readonly Task[], ids: readonly string[]): Task[] {
+  const named = ids.map(id => list.find(task => task.id === id)).filter((task): task is Task => task !== undefined)
+
+  return [...named, ...list.filter(task => !ids.includes(task.id))]
+}
+
+/** Commits an edit draft: tasks that arrived while editing (from Claude, or added) are kept after it. */
+export function mergeDraft(current: readonly Task[], edited: readonly Task[], baseIds: readonly string[]): Task[] {
+  return [...edited, ...current.filter(task => !baseIds.includes(task.id))]
+}
+
+/** Describes what an edit changed, for the model; empty when nothing did. */
+export function describeChanges(before: readonly Task[], after: readonly Task[]): string {
+  const removed = before.filter(task => !after.some(one => one.id === task.id)).map(task => `"${task.subject}"`)
+  const added = after
+    .filter(task => !before.some(one => one.id === task.id))
+    .map(task => {
+      const parent = after.find(one => one.id === task.parentId)
+
+      return parent ? `"${task.subject}" as a subtask of "${parent.subject}"` : `"${task.subject}"`
+    })
+  const renamed = after.flatMap(task => {
+    const old = before.find(one => one.id === task.id)
+
+    return old && old.subject !== task.subject ? [`"${old.subject}" to "${task.subject}"`] : []
+  })
+  const moved = after.flatMap(task => {
+    const old = before.find(one => one.id === task.id)
+
+    return old && ownerOf(old) !== ownerOf(task) && task.parentId === undefined
+      ? [ownerOf(task) === 'user' ? `moved "${task.subject}" to their own to-dos (theirs to do now, not yours)` : `handed "${task.subject}" to you`]
+      : []
+  })
+  const archived = after
+    .filter(task => task.archived === true && before.some(one => one.id === task.id && one.archived !== true))
+    .filter(task => !after.some(one => one.id === task.parentId && one.archived === true))
+    .map(task => `"${task.subject}"`)
+  const kept = before.filter(task => after.some(one => one.id === task.id)).map(task => task.id)
+  const isReordered = kept.join() !== after.filter(task => kept.includes(task.id)).map(task => task.id).join()
+  const parts = [
+    added.length > 0 ? `added ${added.join(', ')}` : '',
+    removed.length > 0 ? `removed ${removed.join(', ')} (do not work on them unless asked)` : '',
+    renamed.length > 0 ? `renamed ${renamed.join(', ')}` : '',
+    ...moved,
+    archived.length > 0 ? `archived ${archived.join(', ')} (put away in the pane, not deleted)` : '',
+    isReordered ? `reordered the checklist to: ${after.map(task => `"${task.subject}"`).join(', ')}` : '',
+  ].filter(part => part !== '')
+
+  return parts.length === 0 ? '' : `The user edited the session checklist: ${parts.join('; ')}.`
+}

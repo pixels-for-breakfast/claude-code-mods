@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { describeChanges, mergeDraft, parseVerdict, reorder } from '../hooks/register'
-import { displayRows, planDrop, progress } from '../hooks/tree'
+import { parseVerdict } from '../hooks/prompts'
+import { describeChanges, displayRows, mergeDraft, planDrop, progress, reorder } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }

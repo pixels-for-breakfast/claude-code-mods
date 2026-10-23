@@ -1,10 +1,15 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderChildren, RenderSurface } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderSurface } from 'claude-code'
 
 import type { Owner, Spent, Task } from '../types'
-import { HANDLE_CELLS } from './task-list'
-import { activeOf, displayRows, moveTask, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
-import type { Row, ShownStatus } from './tree'
+import { DEMO_FOLDED, DEMO_SUMMARY, DEMO_TASKS, DEMO_TITLE } from './demo'
+import { drawBand, drawPane } from './pane'
+import type { BandView, PaneView } from './pane'
+import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './prompts'
+import { MODELS, SWITCHES } from './settings'
+import type { Criterion } from './status'
+import { compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom } from './status'
+import { activeOf, describeChanges, mergeDraft, moveTask, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
 
 const PANE = 'session-glance'
 const summary = atom({ plugin: 'session-glance', key: 'summary' } as const, '')
@@ -69,11 +74,6 @@ async function complete($: EngineInterface, request: Omit<ModelCompleteRequest, 
   }
 
   return reply
-}
-
-/** Token counts as the footer shows them: 950, 1.2k, 18k. */
-export function formatTokens(count: number): string {
-  return count < 1000 ? `${count}` : count < 10_000 ? `${(count / 1000).toFixed(1)}k` : `${Math.round(count / 1000)}k`
 }
 
 /** One saved pane per session in `$.store`, plus the ids newest last, so the oldest can be dropped. */
@@ -158,302 +158,6 @@ async function restore($: EngineInterface): Promise<void> {
   }
 }
 
-/** The status fields, each label in a theme colour for what it means, so the card reads at a glance in light and dark. */
-const FIELDS = [
-  { key: 'goal', label: 'Goal', color: 'suggestion' },
-  { key: 'done_when', label: 'Done when', color: 'permission' },
-  { key: 'done', label: 'Done', color: 'success' },
-  { key: 'next', label: 'Next', color: 'warning' },
-] as const
-const GLYPH = { in_progress: '◐', partial: '◒', pending: '○', completed: '●' } as const
-
-/** Rounded-square checkboxes in the desktop sidebar's grey; in progress and partly done in the accent. */
-const ICON: Record<ShownStatus, string> = {
-  partial:
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="3" fill="none" stroke="#d97757" stroke-width="1.4"/><path d="M5.2 8h5.6" stroke="#d97757" stroke-width="1.8" stroke-linecap="round"/></svg>',
-  pending:
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="3" fill="none" stroke="#8a8a8a" stroke-width="1.4"/></svg>',
-  in_progress:
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="3" fill="none" stroke="#d97757" stroke-width="1.4"/><rect x="5.5" y="5.5" width="5" height="5" rx="1.2" fill="#d97757"/></svg>',
-  completed:
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="3" fill="#6f6f6f"/><path d="M5 8.2l2 2 4-4.4" fill="none" stroke="#f4f4f4" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-}
-
-/** Fold chevrons for a main task with subtasks. */
-const FOLD = {
-  open: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" fill="none" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  closed: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M6.5 4.5l3.5 3.5-3.5 3.5" fill="none" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-} as const
-
-/** A trash bin and an archive box in the sidebar's grey: drawn as pictures, pressed through the Button laid over each. */
-const TRASH =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M4 4.2l.7 9h6.6l.7-9M6.7 6.6v4.6M9.3 6.6v4.6"/></svg>'
-const ARCHIVE =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="3" rx="0.8"/><path d="M3.2 6v6.5h9.6V6M6.5 8.8h3"/></svg>'
-
-/** Everything Edit mode can do, shown when the info mark is clicked. */
-const EDIT_HELP =
-  'Drag ⠿ up or down to reorder. Drag it right to nest a task under the one above, left to take it out again. ' +
-  'Click a task to rename it, add subtasks or move it to the other card. The box archives a task, the bin removes it. ' +
-  'Nothing changes until Save.'
-
-/** An info mark: grey at rest, in the accent while its help is open. */
-export function infoIcon(isOpen: boolean): string {
-  const color = isOpen ? '#d97757' : '#8a8a8a'
-
-  return (
-    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
-    `<circle cx="8" cy="8" r="6.2" fill="none" stroke="${color}" stroke-width="1.3"/>` +
-    `<path d="M8 7.2v4" stroke="${color}" stroke-width="1.4" stroke-linecap="round"/>` +
-    `<circle cx="8" cy="4.9" r="0.85" fill="${color}"/></svg>`
-  )
-}
-
-const DEMO_TASKS: Task[] = [
-  { id: 'demo-1', subject: 'Sketch the pane layout', status: 'completed' },
-  { id: 'demo-2', subject: 'Write the summary prompt', status: 'completed' },
-  { id: 'demo-3', subject: 'Add the toggle above the prompt', status: 'in_progress' },
-  { id: 'demo-3a', subject: 'Draw the button', status: 'completed', parentId: 'demo-3' },
-  { id: 'demo-3b', subject: 'Wire the hotkey', status: 'pending', parentId: 'demo-3' },
-  { id: 'demo-4', subject: 'Seed fake tasks for a demo', status: 'pending' },
-  { id: 'demo-5', subject: 'Try it in a fresh session', status: 'pending' },
-  { id: 'demo-6', subject: 'Polish the terminal spacing', status: 'in_progress' },
-  { id: 'demo-7', subject: 'Ship the drag-and-drop editor', status: 'pending' },
-  { id: 'demo-7a', subject: 'Draw the drop line', status: 'completed', parentId: 'demo-7' },
-  { id: 'demo-7b', subject: 'Nest by dragging sideways', status: 'completed', parentId: 'demo-7' },
-  { id: 'demo-8', subject: 'Write the README', status: 'pending', owner: 'user' },
-  { id: 'demo-8a', subject: 'Explain the /glance command', status: 'pending', parentId: 'demo-8', owner: 'user' },
-  { id: 'demo-8b', subject: 'Add screenshots', status: 'pending', parentId: 'demo-8', owner: 'user' },
-]
-
-/**
- * The demo's status card and title, in the shape Haiku writes them. With DEMO_TASKS it shows every
- * state the pane draws: pending, in progress, done, a partly done main task, a main task done by its
- * subtasks, and a folded one (DEMO_FOLDED).
- */
-const DEMO_TITLE = 'Session glance demo'
-const DEMO_SUMMARY = [
-  'GOAL: Glanceable status and checklist beside the session',
-  'DONE_WHEN: [x] Every task state shows; [ ] Subtasks fold and unfold; [ ] Dragging reorders the list',
-  'DONE: Seeded a demo of everything the pane can show',
-  'NEXT: Click a task, then try Edit mode and drag one',
-].join('\n')
-const DEMO_FOLDED = ['demo-8']
-
-/** Splits the model's reply into the session title and the summary lines below it. */
-export function splitReply(reply: string): { title: string; summary: string } {
-  const match = reply.trim().match(/^TITLE:\s*(.+)\n?([\s\S]*)$/)
-
-  return match ? { title: (match[1] ?? '').trim().slice(0, 80), summary: (match[2] ?? '').trim() } : { title: '', summary: reply.trim() }
-}
-
-/** Reads `Label: value` lines (any case) into goal / done_when / done / next / drift; prose without labels comes back whole as `goal`. */
-export function parseSummary(text: string): Record<string, string> {
-  const fields: Record<string, string> = {}
-  for (const line of text.split('\n')) {
-    const match = line.match(/^\s*[-*]?\s*(goal|done[\s_-]*when|done|next|drift|retitle|your[\s_-]*move)\s*:\s*(.+)$/i)
-    if (match?.[1] && match[2]) {
-      fields[match[1].toLowerCase().replace(/[\s-]+/g, '_')] = match[2].trim()
-    }
-  }
-
-  return Object.keys(fields).length === 0 && text.trim() !== '' ? { goal: text.trim() } : fields
-}
-
-export type Criterion = { text: string; isMet: boolean; isTicked: boolean }
-
-/**
- * Splits DONE_WHEN into criteria: `[x] met; [ ] open`. A criterion the person ticked stays met
- * whatever the model says. A line without markers is one open criterion, as older summaries wrote it.
- */
-export function parseCriteria(doneWhen: string | undefined, tickedKeys: readonly string[]): Criterion[] {
-  if (doneWhen === undefined || doneWhen.trim() === '') {
-    return []
-  }
-
-  return doneWhen
-    .split(';')
-    .map(part => part.trim().match(/^(?:\[([ xX])\]\s*)?(.+)$/))
-    .flatMap(match => {
-      const text = match?.[2]?.trim() ?? ''
-      const isTicked = tickedKeys.includes(text.toLowerCase())
-
-      return text === '' ? [] : [{ text, isMet: isTicked || match?.[1]?.toLowerCase() === 'x', isTicked }]
-    })
-}
-
-/** DONE_WHEN written back from criteria, for the next summary prompt. */
-export function formatCriteria(criteria: readonly Criterion[]): string {
-  return criteria.map(criterion => `[${criterion.isMet ? 'x' : ' '}] ${criterion.text}`).join('; ')
-}
-
-/** A RETITLE line worth offering: not "none", not the title the session already has, not one the person dismissed. */
-export function suggestionFrom(retitle: string | undefined, anchor: string, dismissed: readonly string[]): string {
-  const suggestion = driftNote(retitle).replace(/^["']|["']$/g, '').slice(0, 80)
-
-  return suggestion === '' || suggestion.toLowerCase() === anchor.toLowerCase() || dismissed.includes(suggestion.toLowerCase()) ? '' : suggestion
-}
-
-/** The drift line to show, or empty when the turn served the goal. */
-export function driftNote(drift: string | undefined): string {
-  return drift === undefined || /^(none|no|n\/a|-)?\.?$/i.test(drift.trim()) ? '' : drift.trim()
-}
-
-/**
- * The session as markdown to paste into a PR, a standup or the next session: title, status,
- * done-when as checkboxes and the whole checklist (folded subtasks too) in the pane's order.
- */
-export function handoffMarkdown(sessionTitle: string, text: string, all: readonly Task[], tickedKeys: readonly string[]): string {
-  const fields = parseSummary(text)
-  const criteria = parseCriteria(fields.done_when, tickedKeys)
-  const status = [
-    fields.goal ? `**Goal:** ${fields.goal}` : '',
-    criteria.length > 0 ? ['**Done when:**', ...criteria.map(criterion => `- [${criterion.isMet ? 'x' : ' '}] ${criterion.text}`)].join('\n') : '',
-    fields.done ? `**Done:** ${fields.done}` : '',
-    fields.next ? `**Next:** ${fields.next}` : '',
-  ].filter(part => part !== '')
-  const section = (heading: string, owner: Owner): string[] => {
-    const lines = displayRows(activeOf(ownedBy(all, owner))).map(row => `${row.depth === 1 ? '  ' : ''}- [${row.shown === 'completed' ? 'x' : ' '}] ${row.task.subject}`)
-
-    return lines.length > 0 ? [heading, lines.join('\n')] : []
-  }
-
-  return [`# ${sessionTitle || 'Session'}`, ...status, ...section('## Agent tasks', 'agent'), ...section('## Your to-dos', 'user')].join('\n\n')
-}
-
-/** What a compaction is told to keep: the goal and its done-when, word for word; empty with neither. */
-export function compactNote(text: string): string {
-  const fields = parseSummary(text)
-  const lines = [fields.goal ? `Goal: ${fields.goal}` : '', fields.done_when ? `Done when: ${fields.done_when}` : ''].filter(line => line !== '')
-
-  return lines.length === 0 ? '' : `Keep the session's goal in the summary, word for word. ${lines.join('. ')}.`
-}
-
-/** Builds the rolling-summary prompt: the previous status is folded together with the latest exchange. */
-export function summaryPrompt(previous: string, prompt: string, answer: string, tickedKeys: readonly string[] = [], titleToCheck = ''): string {
-  const fields = parseSummary(previous)
-  const doneWhen = formatCriteria(parseCriteria(fields.done_when, tickedKeys))
-
-  return [
-    `You keep a glanceable status of a coding session. Reply with exactly these ${titleToCheck === '' ? 'seven' : 'eight'} lines and nothing else:`,
-    'TITLE: <session title, max 6 words>',
-    'GOAL: <what the user is after, max 12 words>',
-    'DONE_WHEN: <1-4 checkable criteria that mean the goal is reached, max 8 words each, separated by "; ", each starting [x] when met, else [ ]>',
-    'DONE: <what was just finished, max 12 words>',
-    'NEXT: <the next step or open question, max 12 words>',
-    'DRIFT: <when the latest exchange did not serve GOAL, what happened instead, max 10 words; else none>',
-    "YOUR_MOVE: <when the next step is the user's own (push, review, answer a question, decide, test by hand), that step as a short imperative, max 8 words; else none>",
-    ...(titleToCheck === ''
-      ? []
-      : [
-          `RETITLE: <only when the session's work as a whole has moved away from what the title "${titleToCheck}" describes (a detour of one exchange is not enough): a title that fits it now, max 6 words; else none>`,
-        ]),
-    'Keep criteria that still apply word for word; a criterion marked [x] in the previous status stays [x]. A new goal gets new criteria.',
-    'Terse fragments, no full sentences, no markdown, no repetition between lines.',
-    `<previous_status>${previous ? FIELDS.map(field => `${field.key.toUpperCase()}: ${(field.key === 'done_when' ? doneWhen : fields[field.key]) ?? ''}`).join('\n') : '(none yet)'}</previous_status>`,
-    `<latest_user_message>${prompt.slice(0, 4000)}</latest_user_message>`,
-    `<latest_assistant_reply>${answer.slice(0, 8000)}</latest_assistant_reply>`,
-  ].join('\n')
-}
-
-/** Desktop chevrons in the sidebar's grey, drawn beside the header label as the app's own cards do. */
-const CHEVRON = {
-  open: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" fill="none" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-  closed: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M6.5 4.5l3.5 3.5-3.5 3.5" fill="none" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
-} as const
-
-type Verdict = { verdict: 'ok' | 'unclear' | 'duplicate'; subject: string; question: string; options: string[]; duplicateOf: string }
-
-/** Reads Haiku's JSON verdict on a task; anything unreadable is treated as "fine as typed". */
-export function parseVerdict(reply: string, typed: string): Verdict {
-  const fallback: Verdict = { verdict: 'ok', subject: typed, question: '', options: [], duplicateOf: '' }
-  const json = reply.match(/\{[\s\S]*\}/)?.[0]
-  if (json === undefined) {
-    return fallback
-  }
-  try {
-    const raw = JSON.parse(json) as Partial<Verdict>
-    const verdict = raw.verdict === 'unclear' || raw.verdict === 'duplicate' ? raw.verdict : 'ok'
-    const options = Array.isArray(raw.options) ? raw.options.filter(o => typeof o === 'string' && o.trim() !== '').slice(0, 3) : []
-
-    return {
-      verdict: verdict === 'unclear' && options.length === 0 ? 'ok' : verdict,
-      subject: typeof raw.subject === 'string' && raw.subject.trim() !== '' ? raw.subject.trim() : typed,
-      question: typeof raw.question === 'string' ? raw.question.trim() : '',
-      options,
-      duplicateOf: typeof raw.duplicateOf === 'string' ? raw.duplicateOf.trim() : '',
-    }
-  } catch {
-    return fallback
-  }
-}
-
-/** Builds the validation prompt for a task the person typed. */
-export function validationPrompt(typed: string, goal: string, existing: readonly Task[]): string {
-  return [
-    'A user is adding a task to the checklist of a coding session. Judge the typed text and reply with one JSON object:',
-    '{"verdict":"ok"|"unclear"|"duplicate","subject":"<clean imperative task, max 10 words>","question":"<one short question>","options":["<2-3 concrete candidate tasks>"],"duplicateOf":"<existing task>"}',
-    '- ok: the task is concrete enough to act on; "subject" is its tidied wording (keep the meaning, fix typos).',
-    '- unclear: only when you cannot write a concrete task without guessing; ask the question and give options that each resolve it.',
-    '- duplicate: it means the same as an open existing task; name it in "duplicateOf".',
-    `<session_goal>${goal || '(unknown)'}</session_goal>`,
-    `<existing_tasks>${existing.map(task => `- [${task.status}] ${task.subject}`).join('\n') || '(none)'}</existing_tasks>`,
-    `<typed_task>${typed.slice(0, 500)}</typed_task>`,
-  ].join('\n')
-}
-
-/** Puts a list in the order of `ids`; tasks the ids do not name keep their place at the end. */
-export function reorder(list: readonly Task[], ids: readonly string[]): Task[] {
-  const named = ids.map(id => list.find(task => task.id === id)).filter((task): task is Task => task !== undefined)
-
-  return [...named, ...list.filter(task => !ids.includes(task.id))]
-}
-
-/** Commits an edit draft: tasks that arrived while editing (from Claude, or added) are kept after it. */
-export function mergeDraft(current: readonly Task[], edited: readonly Task[], baseIds: readonly string[]): Task[] {
-  return [...edited, ...current.filter(task => !baseIds.includes(task.id))]
-}
-
-/** Describes what an edit changed, for the model; empty when nothing did. */
-export function describeChanges(before: readonly Task[], after: readonly Task[]): string {
-  const removed = before.filter(task => !after.some(one => one.id === task.id)).map(task => `"${task.subject}"`)
-  const added = after
-    .filter(task => !before.some(one => one.id === task.id))
-    .map(task => {
-      const parent = after.find(one => one.id === task.parentId)
-
-      return parent ? `"${task.subject}" as a subtask of "${parent.subject}"` : `"${task.subject}"`
-    })
-  const renamed = after.flatMap(task => {
-    const old = before.find(one => one.id === task.id)
-
-    return old && old.subject !== task.subject ? [`"${old.subject}" to "${task.subject}"`] : []
-  })
-  const moved = after.flatMap(task => {
-    const old = before.find(one => one.id === task.id)
-
-    return old && ownerOf(old) !== ownerOf(task) && task.parentId === undefined
-      ? [ownerOf(task) === 'user' ? `moved "${task.subject}" to their own to-dos (theirs to do now, not yours)` : `handed "${task.subject}" to you`]
-      : []
-  })
-  const archived = after
-    .filter(task => task.archived === true && before.some(one => one.id === task.id && one.archived !== true))
-    .filter(task => !after.some(one => one.id === task.parentId && one.archived === true))
-    .map(task => `"${task.subject}"`)
-  const kept = before.filter(task => after.some(one => one.id === task.id)).map(task => task.id)
-  const isReordered = kept.join() !== after.filter(task => kept.includes(task.id)).map(task => task.id).join()
-  const parts = [
-    added.length > 0 ? `added ${added.join(', ')}` : '',
-    removed.length > 0 ? `removed ${removed.join(', ')} (do not work on them unless asked)` : '',
-    renamed.length > 0 ? `renamed ${renamed.join(', ')}` : '',
-    ...moved,
-    archived.length > 0 ? `archived ${archived.join(', ')} (put away in the pane, not deleted)` : '',
-    isReordered ? `reordered the checklist to: ${after.map(task => `"${task.subject}"`).join(', ')}` : '',
-  ].filter(part => part !== '')
-
-  return parts.length === 0 ? '' : `The user edited the session checklist: ${parts.join('; ')}.`
-}
-
 /** Tells the model about a change the person made in the pane; it reads this on its next turn. */
 async function tellModel($: EngineInterface, change: string): Promise<void> {
   await $.session.append({
@@ -529,11 +233,6 @@ async function addOwnTask($: EngineInterface, subject: string, owner: Owner): Pr
       : `The user added the task "${subject}" to the session checklist.`,
   )
   await save($)
-}
-
-/** The selection as a task text: whitespace folded, cut to what the task check reads. */
-export function selectionTask(text: string | undefined): string {
-  return (text ?? '').replace(/\s+/g, ' ').trim().slice(0, 500)
 }
 
 /** Redraws the band only when text gets selected or the selection goes away. */
@@ -692,9 +391,6 @@ async function changeStatus($: EngineInterface, task: Task): Promise<void> {
   await save($)
 }
 
-/** Type and spacing: two steps up the API's five sizes (caption, footnote, body, heading, title), for reading at a glance. */
-const TYPE = { text: 'heading', label: 'body', head: 'title', icon: 24, padX: 'xl', padY: 'lg' } as const
-
 /** Folds the latest exchange into the status; false when there was nothing to fold or the model gave no reply. */
 async function summarize($: EngineInterface): Promise<boolean> {
   const answer = await read($, lastAnswer)
@@ -810,18 +506,6 @@ async function openPane($: EngineInterface): Promise<void> {
   await update($, isPaneOpen, () => true)
 }
 
-/** `/glance <word> on|off` and the userConfig field each one sets. */
-const SWITCHES = {
-  rename: { key: 'renameSession', on: 'The status title will now rename this session at your next prompt.', off: 'Sessions keep their own title now.' },
-  auto: { key: 'autoSummary', on: 'The status updates after every answer again.', off: 'The status only changes on /glance refresh now.' },
-  check: { key: 'checkTasks', on: 'Typed tasks are checked again.', off: 'Typed tasks are added as typed now.' },
-  suggest: {
-    key: 'suggestTitle',
-    on: 'A new title is suggested when the work moves away from the session title (while renaming is off).',
-    off: 'No more title suggestions.',
-  },
-} as const
-const MODELS = ['haiku', 'sonnet'] as const
 
 /** Writes one of the mod's settings; the engine then reloads the module with the new options. */
 async function setOption($: EngineInterface, key: string, value: boolean | string): Promise<void> {
@@ -1064,521 +748,102 @@ export const register: Register = (on, options) => {
     if (e.props.hasSurvey) {
       return next(e)
     }
-    const { Box, Button, Text } = $.ui.resolve(e)
     const isOpen = await read($, isPaneOpen)
     const list = await read($, tasks)
     const { done, total } = progress(activeOf(ownedBy(list, 'agent')))
     const mineOpen = progress(activeOf(ownedBy(list, 'user')))
-    const openForYou = mineOpen.total - mineOpen.done
-    const current = await read($, title)
-    const isSelected = await read($, hasSelection)
-    const toggle = async (): Promise<void> => {
-      if (isOpen) {
-        // Our own close is not echoed back as a `ui.close` event, so record it here.
-        await $.ui.close({ id: PANE })
-        await update($, isPaneOpen, () => false)
-      } else {
-        await openPane($)
-      }
+    const view: BandView = {
+      isTerminal: e.surface === 'terminal',
+      isOpen,
+      title: await read($, title),
+      done,
+      total,
+      openForYou: mineOpen.total - mineOpen.done,
+      isSelected: await read($, hasSelection),
     }
 
-    return (
-      <Box gap="sm" alignItems="center">
-        <Button key="toggle-pane" plain dimColor hotkey={e.surface === 'terminal' ? 'g' : undefined} onPress={toggle}>
-          <Text size="footnote" color="subtle">
-            {isOpen ? '◂ Hide status' : '▸ Show status'}
-          </Text>
-        </Button>
-        {isSelected && (
-          <Button key="task-from-selection" plain onPress={() => addFromSelection($, 'agent')}>
-            <Text size="footnote" color="claude">
-              + Task
-            </Text>
-          </Button>
-        )}
-        {isSelected && (
-          <Button key="todo-from-selection" plain onPress={() => addFromSelection($, 'user')}>
-            <Text size="footnote" color="claude">
-              + To-do
-            </Text>
-          </Button>
-        )}
-        <Text size="footnote" color="inactive" wrap="truncate-end">
-          {current || 'No status yet'}
-          {total > 0 ? `  ·  ${done}/${total} tasks` : ''}
-          {openForYou > 0 ? `  ·  ${openForYou} for you` : ''}
-        </Text>
-      </Box>
-    )
+    return drawBand($.ui.resolve(e), view, {
+      togglePane: async () => {
+        if (isOpen) {
+          // Our own close is not echoed back as a `ui.close` event, so record it here.
+          await $.ui.close({ id: PANE })
+          await update($, isPaneOpen, () => false)
+        } else {
+          await openPane($)
+        }
+      },
+      addSelection: owner => addFromSelection($, owner),
+    })
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const table = $.ui.resolve(e)
-    const { Box, Button, Text } = table
-    const Client = 'Client' in table ? table.Client : undefined
-    const Input = 'Input' in table ? table.Input : undefined
     const managing = await read($, isManaging)
-    const editedCard = await read($, editingOwner)
-    const helpOpen = await read($, isHelpOpen)
-    const checking = await read($, isValidating)
-    const adds = await read($, addCount)
-    const selected = await read($, selectedId)
-    const subtaskAdds = await read($, subtaskCount)
-    const foldedIds = await read($, folded)
     const fields = parseSummary(await read($, summary))
     const criteria = parseCriteria(fields.done_when, await read($, ticked))
-    const isReached = criteria.length > 0 && criteria.every(criterion => criterion.isMet)
-    const drift = driftNote(fields.drift)
-    const cost = await read($, spent)
-    const suggestion = await read($, titleSuggestion)
-    const chosenTitle = await read($, pendingTitle)
-    const busy = await read($, isSummarizing)
-    const stored = managing ? await read($, draft) : await read($, tasks)
-    const showSummary = await read($, isSummaryOpen)
-    const showTasks = await read($, isTasksOpen)
-    const showMine = await read($, isMineOpen)
-    const mineAdds = await read($, mineAddCount)
-    const nextMove = await read($, moveSuggestion)
-    const archiveOwners = await read($, openArchives)
-    const showSettings = await read($, isSettingsOpen)
-    const settingRows = [
-      { key: 'renameSession', label: 'Rename the session', hint: 'The status title becomes the session title', isOn: options.renameSession === true },
-      { key: 'suggestTitle', label: 'Suggest a new title', hint: 'When the work moves on; only while renaming is off', isOn: options.suggestTitle !== false },
-      { key: 'autoSummary', label: 'Update after every answer', hint: 'Off: only on /glance refresh', isOn: settings.isAutoSummary },
-      { key: 'checkTasks', label: 'Check tasks you type', hint: 'Tidy the wording, ask when unclear', isOn: settings.isTaskCheck },
-    ]
-    const hasSummary = Object.keys(fields).length > 0
-    const isTerminal = e.surface === 'terminal'
-    const type = TYPE
-    // The terminal lays out whole cells only: two per Edit row, a blank one above the text that the drop line can use.
-    // Elsewhere the heading-size rows take three.
-    const rowHeight = isTerminal ? 2 : 3
-    const { Svg } = e.surface === 'terminal' ? { Svg: undefined } : $.ui.resolve(e)
-
-    // The terminal draws the small spacing steps as no rows at all, so it gets whole blank rows where the desktop's gaps fall.
-    const airy = isTerminal ? 1 : 0
-    const header = (key: string, label: string, isOpen: boolean, aside: RenderChildren, onPress: () => unknown) => (
-      <Box justifyContent="space-between" alignItems="center" marginBottom={airy}>
-        <Box alignItems="center" gap="xs">
-          <Button key={key} plain onPress={onPress}>
-            <Text weight="medium" size={type.head} color="claude">
-              {label}
-            </Text>
-            {!Svg && <Text color="inactive">{isOpen ? ' ▾' : ' ▸'}</Text>}
-          </Button>
-          {Svg && <Svg source={isOpen ? CHEVRON.open : CHEVRON.closed} alt={isOpen ? 'collapse' : 'expand'} width={14} height={14} />}
-        </Box>
-        {aside}
-      </Box>
-    )
-    const note = (text: string) => (
-      <Text size={type.text} color="inactive">
-        {text}
-      </Text>
-    )
-    // A Button holds text only, so an icon that takes a press is a picture with an empty Button laid over it.
-    const iconButton = (key: string, source: string, alt: string, glyph: string, onPress: () => unknown) =>
-      Svg ? (
-        <Box position="relative">
-          <Svg source={source} alt={alt} width={type.icon} height={type.icon} />
-          <Box position="absolute" top={0} left={0} width="100%" height="100%">
-            <Button key={key} plain onPress={onPress}>
-              <Text>{'\u2003'}</Text>
-            </Button>
-          </Box>
-        </Box>
-      ) : (
-        <Button key={key} plain onPress={onPress}>
-          <Text color="inactive">{glyph}</Text>
-        </Button>
-      )
-    const toggleFold = (id: string) => update($, folded, ids => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id]))
-
-    /** One task row: checkbox, text that shrinks before anything is pushed out, subtask count and fold caret, trash in Edit mode. */
-    const taskRow = (row: Row, isEditing: boolean, isFirst: boolean) => {
-      const isFolded = foldedIds.includes(row.task.id)
-      // The caret sits at the row's end, so rows with and without one keep their checkboxes in line.
-      const fold =
-        row.children > 0
-          ? iconButton(`fold-${row.task.id}`, isFolded ? FOLD.closed : FOLD.open, isFolded ? 'expand' : 'collapse', isFolded ? '▸' : '▾', () => toggleFold(row.task.id))
-          : null
-
-      return (
-        <Box
-          key={`${isEditing ? 'edit' : 'row'}-${row.task.id}`}
-          height={isEditing ? rowHeight : undefined}
-          alignItems={isEditing && isTerminal ? 'flex-end' : 'center'}
-          gap="sm"
-          minWidth={0}
-          paddingLeft={row.depth === 1 && !isEditing ? 3 : 0}
-          // Edit rows keep their fixed pitch: the layer over them maps the pointer by it.
-          marginTop={!isEditing && row.depth === 0 && !isFirst ? airy : 0}
-        >
-          {isEditing && (
-            <Box width={HANDLE_CELLS + (row.depth === 1 ? 3 : 0)} flexShrink={0}>
-              <Text color="inactive">⠿</Text>
-            </Box>
-          )}
-          {Svg ? (
-            <Svg source={ICON[row.shown]} alt={row.shown.replace('_', ' ')} width={type.icon} height={type.icon} />
-          ) : (
-            <Text color={row.shown === 'in_progress' || row.shown === 'partial' ? 'claude' : 'inactive'}>{GLYPH[row.shown]}</Text>
-          )}
-          <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-            <Button
-              key={`${isEditing ? 'select' : 'task'}-${row.task.id}`}
-              plain
-              onPress={() => (isEditing ? update($, selectedId, current => (current === row.task.id ? '' : row.task.id)) : changeStatus($, row.task))}
-            >
-              <Text
-                size={type.text}
-                color={row.shown === 'completed' ? 'inactive' : undefined}
-                strikethrough={!isEditing && row.shown === 'completed'}
-                underline={isEditing && row.task.id === selected}
-                wrap="truncate-end"
-              >
-                {row.task.subject}
-              </Text>
-            </Button>
-          </Box>
-          {row.children > 0 && note(`${row.childrenDone}/${row.children}`)}
-          {!isEditing && fold}
-        </Box>
-      )
+    const view: PaneView = {
+      isTerminal: e.surface === 'terminal',
+      fields,
+      criteria,
+      isReached: criteria.length > 0 && criteria.every(criterion => criterion.isMet),
+      drift: driftNote(fields.drift),
+      cost: await read($, spent),
+      model: settings.model,
+      suggestion: await read($, titleSuggestion),
+      chosenTitle: await read($, pendingTitle),
+      busy: await read($, isSummarizing),
+      checking: await read($, isValidating),
+      stored: managing ? await read($, draft) : await read($, tasks),
+      managing,
+      editedCard: await read($, editingOwner),
+      helpOpen: await read($, isHelpOpen),
+      adds: await read($, addCount),
+      mineAdds: await read($, mineAddCount),
+      selected: await read($, selectedId),
+      subtaskAdds: await read($, subtaskCount),
+      foldedIds: await read($, folded),
+      showSummary: await read($, isSummaryOpen),
+      showTasks: await read($, isTasksOpen),
+      showMine: await read($, isMineOpen),
+      showSettings: await read($, isSettingsOpen),
+      nextMove: await read($, moveSuggestion),
+      archiveOwners: await read($, openArchives),
+      settingRows: [
+        { key: 'renameSession', label: 'Rename the session', hint: 'The status title becomes the session title', isOn: options.renameSession === true },
+        { key: 'suggestTitle', label: 'Suggest a new title', hint: 'When the work moves on; only while renaming is off', isOn: options.suggestTitle !== false },
+        { key: 'autoSummary', label: 'Update after every answer', hint: 'Off: only on /glance refresh', isOn: settings.isAutoSummary },
+        { key: 'checkTasks', label: 'Check tasks you type', hint: 'Tidy the wording, ask when unclear', isOn: settings.isTaskCheck },
+      ],
     }
+    const toggle = (id: string) => (ids: string[]) => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id])
 
-    /** The buttons of one Edit-mode row, at the row's pitch so they line up with it: fold, archive, remove; one click each, beside the drag layer. */
-    const editControls = (row: Row) => (
-      <Box key={`controls-${row.task.id}`} height={rowHeight} alignItems={isTerminal ? 'flex-end' : 'center'} justifyContent="flex-end" gap="sm">
-        {row.children > 0 &&
-          (foldedIds.includes(row.task.id)
-            ? iconButton(`fold-${row.task.id}`, FOLD.closed, 'expand', '▸', () => toggleFold(row.task.id))
-            : iconButton(`fold-${row.task.id}`, FOLD.open, 'collapse', '▾', () => toggleFold(row.task.id)))}
-        {iconButton(`archive-${row.task.id}`, ARCHIVE, 'Archive', '▤', () => archiveInDraft($, row.task))}
-        {iconButton(`remove-${row.task.id}`, TRASH, 'Remove', '✕', () => removeFromDraft($, row.task))}
-      </Box>
-    )
-
-    /** One task card: the agent's tasks, or the person's own to-dos. Edit mode covers both cards at once. */
-    const taskCard = (owner: Owner) => {
-      const isMine = owner === 'user'
-      // The agent's card keeps the keys it had before the split.
-      const suffix = isMine ? '-mine' : ''
-      const list = activeOf(ownedBy(stored, owner))
-      // Shown once in the fold: a subtask archived with its main task goes with it.
-      const archivedTasks = ownedBy(stored, owner).filter(
-        task => task.archived === true && !stored.some(one => one.id === task.parentId && one.archived === true),
-      )
-      const isArchiveOpen = archiveOwners.includes(owner)
-      const rows = displayRows(list, foldedIds)
-      const { done, total } = progress(list)
-      const isOpen = isMine ? showMine : showTasks
-      // One card edits at a time; while it does, the other shows its tasks and no Edit button.
-      const isEditing = managing && editedCard === owner
-
-      return (
-        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-          {header(
-            `toggle-tasks${suffix}`,
-            isMine ? 'Your to-dos' : 'Agent tasks',
-            isOpen,
-            <Box gap="sm" alignItems="center">
-              {checking || total === 0 || done < total ? (
-                note(checking ? 'checking…' : total > 0 ? `${done}/${total}` : '')
-              ) : (
-                <Text size={type.text} color="success">
-                  {`${done}/${total}`}
-                </Text>
-              )}
-              {isOpen && !managing && (
-                <Button key={`toggle-manage${suffix}`} plain onPress={() => startEditing($, owner)}>
-                  <Text size={type.text} color="subtle">
-                    Edit
-                  </Text>
-                </Button>
-              )}
-              {isOpen && isEditing && (
-                <Button key={`cancel-edit${suffix}`} plain onPress={() => stopEditing($, false)}>
-                  <Text size={type.text} color="subtle">
-                    Cancel
-                  </Text>
-                </Button>
-              )}
-              {isOpen && isEditing && (
-                <Button key={`save-edit${suffix}`} plain onPress={() => stopEditing($, true)}>
-                  <Text size={type.text} color="claude" weight="medium">
-                    Save
-                  </Text>
-                </Button>
-              )}
-            </Box>,
-            () => (isMine ? update($, isMineOpen, open => !open) : update($, isTasksOpen, open => !open)),
-          )}
-          {isOpen && isMine && nextMove !== '' && !isEditing && (
-            <Box flexDirection="column" gap="xs" marginBottom={airy}>
-              <Text size={type.label} color="suggestion">
-                Your next step?
-              </Text>
-              <Text size={type.text}>{nextMove}</Text>
-              <Box gap="md" alignItems="center">
-                <Button key="add-move" plain onPress={() => acceptMove($)}>
-                  <Text size={type.text} color="claude" weight="medium">
-                    Add
-                  </Text>
-                </Button>
-                <Button key="dismiss-move" plain onPress={() => dismissMove($)}>
-                  <Text size={type.text} color="subtle">
-                    Dismiss
-                  </Text>
-                </Button>
-              </Box>
-            </Box>
-          )}
-          {isOpen && rows.length === 0 && note(isMine ? 'Nothing for you yet.' : 'No tasks yet.')}
-          {isOpen && isEditing && Client && rows.length > 0 && (
-            // The rows below hold the icons; the layer on top draws handles and the drop line and takes the clicks.
-            // The layer covers the handle and text only; the buttons beside it are real Buttons, one click each.
-            <Box gap="sm" minWidth={0}>
-              <Box flexDirection="column" position="relative" flexGrow={1} flexShrink={1} minWidth={0}>
-                {rows.map((row, i) => taskRow(row, true, i === 0))}
-                {isTerminal && <Box height={1} />}
-                <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                  <Client
-                    key={`edit-overlay${suffix}`}
-                    module="./task-list.tsx"
-                    props={{ tasks: list, folded: foldedIds, rowHeight, hasGapRows: isTerminal }}
-                    width="100%"
-                    height={Math.ceil(rows.length * rowHeight) + (isTerminal ? 1 : 0)}
-                  />
-                </Box>
-              </Box>
-              <Box flexDirection="column" flexShrink={0}>
-                {rows.map(row => editControls(row))}
-                {isTerminal && <Box height={1} />}
-              </Box>
-            </Box>
-          )}
-          {isOpen &&
-            isEditing &&
-            Input &&
-            rows
-              .filter(row => row.task.id === selected)
-              .map(row => (
-                <Box flexDirection="column" gap="xs" marginTop="sm" borderStyle="round" borderColor="subtle" paddingX="sm" paddingY="sm">
-                  {note('Rename')}
-                  <Input key={`rename-${row.task.id}`} value={row.task.subject} submitLabel="Rename" onSubmit={value => renameInDraft($, row.task, value)} />
-                  {row.depth === 0 && (
-                    <Box flexDirection="column" gap="xs" marginTop="xs">
-                      {note('Add a subtask')}
-                      <Input
-                        key={`subtask-${row.task.id}-${subtaskAdds}`}
-                        placeholder="What needs doing…"
-                        submitLabel="Add"
-                        onSubmit={value => addSubtaskInDraft($, row.task, value)}
-                      />
-                    </Box>
-                  )}
-                  <Box marginTop="xs">
-                    <Button key={`move-${row.task.id}`} plain onPress={() => moveInDraft($, row.task)}>
-                      <Text size={type.text} color="subtle">
-                        {isMine ? 'Hand to the agent' : 'Move to your to-dos'}
-                      </Text>
-                    </Button>
-                  </Box>
-                </Box>
-              ))}
-          {isOpen && isEditing && !selected && rows.length > 0 && (
-            // One short line about nesting, the least obvious move; a click on the info mark shows the rest.
-            <Box marginTop={airy} alignItems="center" gap="sm" minWidth={0}>
-              {iconButton('edit-help', infoIcon(helpOpen), helpOpen ? 'Hide help' : 'Show help', '?', () => update($, isHelpOpen, open => !open))}
-              <Box flexShrink={1} minWidth={0}>{note('Drag ⠿ right to nest a task under the one above')}</Box>
-            </Box>
-          )}
-          {isOpen && isEditing && helpOpen && !selected && rows.length > 0 && (
-            // A blank row above on the terminal, lined up with the line's text after the ?.
-            <Box marginTop={isTerminal ? 1 : 'xs'} paddingLeft={isTerminal ? 2 : 0} minWidth={0}>
-              {note(EDIT_HELP)}
-            </Box>
-          )}
-          {isOpen && (!isEditing || !Client) && rows.map((row, i) => taskRow(row, false, i === 0))}
-          {isOpen && !isEditing && archivedTasks.length > 0 && (
-            <Box flexDirection="column" gap="xs" marginTop={airy}>
-              <Button
-                key={`toggle-archived${suffix}`}
-                plain
-                onPress={() => update($, openArchives, owners => (owners.includes(owner) ? owners.filter(one => one !== owner) : [...owners, owner]))}
-              >
-                <Text size={type.text} color="inactive">
-                  {`Archived (${archivedTasks.length}) ${isArchiveOpen ? '▾' : '▸'}`}
-                </Text>
-              </Button>
-              {isArchiveOpen &&
-                archivedTasks.map(task => (
-                  <Box key={`archived-${task.id}`} alignItems="center" gap="sm" minWidth={0}>
-                    <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-                      <Text size={type.text} color="inactive" wrap="truncate-end">
-                        {task.subject}
-                      </Text>
-                    </Box>
-                    <Button key={`restore-${task.id}`} plain onPress={() => restoreTask($, task)}>
-                      <Text size={type.text} color="subtle">
-                        Restore
-                      </Text>
-                    </Button>
-                  </Box>
-                ))}
-            </Box>
-          )}
-          {isOpen && Input && (
-            <Box marginTop={isTerminal ? 1 : 'sm'}>
-              <Input
-                key={`add-task${suffix}-${isMine ? mineAdds : adds}`}
-                placeholder={isMine ? 'Add a to-do for yourself…' : 'Add a task for the agent…'}
-                submitLabel="Add"
-                onSubmit={value => addTask($, value, owner)}
-              />
-            </Box>
-          )}
-        </Box>
-      )
-    }
-
-    return (
-      <Box flexDirection="column" gap="lg" padding={isTerminal ? 0 : 'md'}>
-        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-          {header(
-            'toggle-summary',
-            'Status',
-            showSummary,
-            <Box gap="sm" alignItems="center">
-              {note(busy ? 'updating…' : '')}
-              {(hasSummary || stored.length > 0) && !managing && (
-                <Button
-                  key="copy-handoff"
-                  plain
-                  onPress={async () => {
-                    const { isCopied } = await copyHandoff($, e.surface)
-                    $.ui.toast(isCopied ? 'Copied the session as markdown' : 'No clipboard here: /glance copy prints it')
-                  }}
-                >
-                  <Text size={type.text} color="subtle">
-                    Copy
-                  </Text>
-                </Button>
-              )}
-            </Box>,
-            () => update($, isSummaryOpen, open => !open),
-          )}
-          {suggestion !== '' && (
-            <Box flexDirection="column" gap="xs" marginBottom={airy}>
-              <Text size={type.label} color="suggestion">
-                Title suggestion
-              </Text>
-              <Text size={type.text}>{suggestion}</Text>
-              <Box gap="md" alignItems="center">
-                <Button key="use-title" plain onPress={() => useSuggestion($)}>
-                  <Text size={type.text} color="claude" weight="medium">
-                    Use
-                  </Text>
-                </Button>
-                <Button key="dismiss-title" plain onPress={() => dismissSuggestion($)}>
-                  <Text size={type.text} color="subtle">
-                    Dismiss
-                  </Text>
-                </Button>
-              </Box>
-            </Box>
-          )}
-          {chosenTitle !== '' && note(`Renames the session to "${chosenTitle}" at your next prompt.`)}
-          {showSummary && !hasSummary && (
-            <Text size={type.text} color="inactive">
-              Appears after the first answer.
-            </Text>
-          )}
-          {showSummary &&
-            FIELDS.filter(field => fields[field.key]).map(field => (
-              <Box flexDirection="column" marginBottom={airy}>
-                <Text size={type.label} color={field.color}>
-                  {field.label}
-                </Text>
-                {field.key === 'done_when' ? (
-                  <Box flexDirection="column">
-                    {criteria.map(criterion => (
-                      <Box key={`criterion-row-${criterion.text}`} alignItems="center" gap="sm" minWidth={0}>
-                        {Svg ? (
-                          <Svg source={criterion.isMet ? ICON.completed : ICON.pending} alt={criterion.isMet ? 'met' : 'open'} width={type.icon} height={type.icon} />
-                        ) : (
-                          <Text color="inactive">{criterion.isMet ? GLYPH.completed : GLYPH.pending}</Text>
-                        )}
-                        <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                          <Button key={`criterion-${criterion.text}`} plain onPress={() => toggleCriterion($, criterion)}>
-                            <Text size={type.text} color={criterion.isMet ? 'inactive' : undefined}>
-                              {criterion.text}
-                            </Text>
-                          </Button>
-                        </Box>
-                      </Box>
-                    ))}
-                    {isReached && (
-                      <Text size={type.text} color="success">
-                        Goal reached: wrap up, or set a new goal.
-                      </Text>
-                    )}
-                  </Box>
-                ) : (
-                  <Text size={type.text}>{fields[field.key]}</Text>
-                )}
-              </Box>
-            ))}
-          {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
-        </Box>
-
-        {taskCard('agent')}
-        {taskCard('user')}
-        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-          {header('toggle-settings', 'Settings', showSettings, null, () => update($, isSettingsOpen, open => !open))}
-          {showSettings &&
-            settingRows.map(row => (
-              <Box key={`setting-row-${row.key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
-                <Box flexDirection="column" flexShrink={1} minWidth={0}>
-                  <Text size={type.text}>{row.label}</Text>
-                  <Text size={type.label} color="inactive">
-                    {row.hint}
-                  </Text>
-                </Box>
-                <Button key={`setting-${row.key}`} plain onPress={() => setOption($, row.key, !row.isOn)}>
-                  <Text size={type.text} color={row.isOn ? 'claude' : 'subtle'} weight={row.isOn ? 'medium' : undefined}>
-                    {row.isOn ? 'On' : 'Off'}
-                  </Text>
-                </Button>
-              </Box>
-            ))}
-          {showSettings && (
-            <Box justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
-              <Box flexDirection="column" flexShrink={1} minWidth={0}>
-                <Text size={type.text}>Model</Text>
-                <Text size={type.label} color="inactive">
-                  For the status and the task check
-                </Text>
-              </Box>
-              <Box gap="md" alignItems="center">
-                {MODELS.map(model => (
-                  <Button key={`model-${model}`} plain onPress={() => setOption($, 'summaryModel', model)}>
-                    <Text size={type.text} color={settings.model === model ? 'claude' : 'subtle'} weight={settings.model === model ? 'medium' : undefined}>
-                      {model === 'haiku' ? 'Haiku' : 'Sonnet'}
-                    </Text>
-                  </Button>
-                ))}
-              </Box>
-            </Box>
-          )}
-        </Box>
-        {cost.calls > 0 && (
-          <Text size="footnote" color="inactive">
-            {`glance: ${cost.calls} ${cost.calls === 1 ? 'call' : 'calls'} · ${formatTokens(cost.input + cost.output)} tokens (${formatTokens(cost.output)} out) · ${settings.model}`}
-          </Text>
-        )}
-      </Box>
-    )
+    return drawPane($.ui.resolve(e), view, {
+      toggleSummary: () => update($, isSummaryOpen, open => !open),
+      toggleCard: owner => (owner === 'user' ? update($, isMineOpen, open => !open) : update($, isTasksOpen, open => !open)),
+      toggleSettings: () => update($, isSettingsOpen, open => !open),
+      toggleFold: id => update($, folded, toggle(id)),
+      toggleArchive: owner => update($, openArchives, owners => (owners.includes(owner) ? owners.filter(one => one !== owner) : [...owners, owner])),
+      toggleHelp: () => update($, isHelpOpen, open => !open),
+      select: id => update($, selectedId, current => (current === id ? '' : id)),
+      changeStatus: task => changeStatus($, task),
+      startEditing: owner => startEditing($, owner),
+      stopEditing: isSaved => stopEditing($, isSaved),
+      rename: (task, value) => renameInDraft($, task, value),
+      addSubtask: (task, value) => addSubtaskInDraft($, task, value),
+      move: task => moveInDraft($, task),
+      archive: task => archiveInDraft($, task),
+      remove: task => removeFromDraft($, task),
+      restore: task => restoreTask($, task),
+      add: (value, owner) => addTask($, value, owner),
+      acceptMove: () => acceptMove($),
+      dismissMove: () => dismissMove($),
+      useTitle: () => useSuggestion($),
+      dismissTitle: () => dismissSuggestion($),
+      toggleCriterion: criterion => toggleCriterion($, criterion),
+      copy: async () => {
+        const { isCopied } = await copyHandoff($, e.surface)
+        $.ui.toast(isCopied ? 'Copied the session as markdown' : 'No clipboard here: /glance copy prints it')
+      },
+      setOption: (key, value) => setOption($, key, value),
+    })
   })
 }

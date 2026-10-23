@@ -1,7 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { compactNote, describeChanges, driftNote, formatCriteria, handoffMarkdown, infoIcon, parseCriteria, selectionTask, suggestionFrom, summaryPrompt } from '../hooks/register'
-import { activeOf, moveTask, setArchived } from '../hooks/tree'
+import { infoIcon } from '../hooks/icons'
+import { summaryPrompt } from '../hooks/prompts'
+import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom } from '../hooks/status'
+import { activeOf, describeChanges, moveTask, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
