@@ -62,8 +62,8 @@ const yourMove = atom({ plugin: 'session-glance', key: 'yourMove' } as const, ''
 /** What each earlier turn did, oldest first: the Status card's history. */
 const history = atom({ plugin: 'session-glance', key: 'history' } as const, [] as HistoryEntry[])
 const isHistoryOpen = atom({ plugin: 'session-glance', key: 'isHistoryOpen' } as const, false)
-/** How often the selection is checked for the band's buttons. */
-const SELECTION_POLL_MS = 400
+/** How often the session id and the selection are checked: neither change raises an event. */
+const POLL_MS = 400
 
 /** The person's settings (`userConfig`), set by `register` on every load; a change in the config menu reloads it. */
 const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true, isTitleSuggest: true }
@@ -169,6 +169,11 @@ async function applySnapshot($: EngineInterface, snapshot: Snapshot): Promise<vo
   await update($, isManaging, () => false)
 }
 
+/** Whether a pane holds nothing a later session would want back. */
+function isEmptyPane(snapshot: Snapshot): boolean {
+  return snapshot.summary === '' && snapshot.tasks.length === 0 && snapshot.history.length === 0 && snapshot.spent.calls === 0
+}
+
 /** Saves what the pane shows under this session's id, so /resume and a restart bring it back. */
 async function save($: EngineInterface): Promise<void> {
   try {
@@ -177,7 +182,12 @@ async function save($: EngineInterface): Promise<void> {
     if (id !== (await read($, restoredFor))) {
       return
     }
-    await $.store.set(`${SNAPSHOT_PREFIX}${id}`, await readSnapshot($))
+    const snapshot = await readSnapshot($)
+    // A resumed session starts under a passing id of its own; an empty pane is not worth a slot under it.
+    if (isEmptyPane(snapshot) && (await $.store.get(`${SNAPSHOT_PREFIX}${id}`)) === undefined) {
+      return
+    }
+    await $.store.set(`${SNAPSHOT_PREFIX}${id}`, snapshot)
     const ids = [...(((await $.store.get(SNAPSHOT_INDEX)) as string[] | undefined) ?? []).filter(one => one !== id), id]
     for (const old of ids.slice(0, -KEEP_SESSIONS)) {
       await $.store.delete(`${SNAPSHOT_PREFIX}${old}`)
@@ -620,7 +630,8 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     await restore($)
     // A reload runs session.start again and cancels the old timer with the old module.
-    $.clock.every(SELECTION_POLL_MS, () => void checkSelection($))
+    // The id is checked too: a resumed session starts under a passing id and takes its own a moment later.
+    $.clock.every(POLL_MS, () => void restore($).then(() => checkSelection($)))
     await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance task|todo` adds the selected text, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance rename|suggest|auto|check on|off`, `/glance model haiku|sonnet`)' })
     void openPane($)
 

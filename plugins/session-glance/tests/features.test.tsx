@@ -588,3 +588,25 @@ test('the Status card keeps what earlier turns did under Earlier', async ($, on)
   expect(await pane.find({ type: 'Text', text: '#2' })).toBeDefined()
   await pane.unmount()
 })
+
+test('a resumed session gets its pane back as soon as its own id arrives, before any prompt', async ($, on) => {
+  const saved = { root: '/work/site', title: 'Session glance demo', summary: 'GOAL: Demo', tasks: [{ id: 'demo-1', subject: 'Sketch the pane layout', status: 'completed' }] }
+  mock.store(on, { sessions: ['real'], 'session:real': saved })
+  const clock = mock.clock(on)
+  // The process starts under a passing id; the resumed transcript's id takes over a moment later.
+  let id = 'passing'
+  on('session.id', async () => ({ value: id }))
+  on('session.root', async () => ({ value: '/work/site' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('ui.selection', async () => ({ value: undefined }))
+
+  await $.session.start({ cwd: '/work/site', surface: 'terminal', isInteractive: true })
+  await clock.advance(400)
+  id = 'real'
+  await clock.advance(400)
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'Sketch the pane layout' })).toBeDefined()
+  await pane.unmount()
+})

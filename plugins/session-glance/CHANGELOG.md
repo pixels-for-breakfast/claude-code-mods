@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.1
+
+- A resumed session gets its pane back straight away. In the terminal a resumed session starts under a passing id and takes its own a moment later; the mod only looked again at the next prompt, so the pane stayed empty until then. The id is now checked on the same 400 ms timer as the selection.
+- An empty pane is no longer saved under such a passing id.
+
 ## 1.0.0
 
 - The cost line moves from under the cards into the Settings card's header, so the pane ends with the cards.
