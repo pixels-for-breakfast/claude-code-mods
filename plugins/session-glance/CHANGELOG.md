@@ -1,8 +1,12 @@
 # Changelog
 
+## 1.0.10
+
+- The drop line in Edit mode no longer ends in a stray "…" on the desktop: its strokes wrap to a second line the one-row layer clips, instead of being cut with an ellipsis.
+
 ## 1.0.9
 
-- The drop line in Edit mode ends at the edge of the drag layer without an ellipsis; it ended in a stray "…".
+- An attempt to end the drop line in Edit mode without a stray "…" (`wrap="truncate"`); the desktop still drew it. Fixed in 1.0.10.
 
 ## 1.0.8
 
