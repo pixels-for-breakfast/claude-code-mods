@@ -532,13 +532,18 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
               </Text>
             </Box>
             <Box gap="md" alignItems="center">
-              {MODELS.map(model => (
-                <Button key={`model-${model}`} plain onPress={() => act.setOption('summaryModel', model)}>
-                  <Text size={type.text} color={view.model === model ? 'claude' : 'subtle'} weight={view.model === model ? 'medium' : undefined}>
-                    {model === 'haiku' ? 'Haiku' : 'Sonnet'}
-                  </Text>
-                </Button>
-              ))}
+              {/* The model in use is the primary button: a desktop draws a plain Button natively and ignores its text color. */}
+              {MODELS.map(model =>
+                view.model === model ? (
+                  <Button key={`model-${model}`} variant="primary" label={model === 'haiku' ? 'Haiku' : 'Sonnet'} onPress={() => act.setOption('summaryModel', model)} />
+                ) : (
+                  <Button key={`model-${model}`} plain dimColor onPress={() => act.setOption('summaryModel', model)}>
+                    <Text size={type.text} color="subtle">
+                      {model === 'haiku' ? 'Haiku' : 'Sonnet'}
+                    </Text>
+                  </Button>
+                ),
+              )}
             </Box>
           </Box>
         )}

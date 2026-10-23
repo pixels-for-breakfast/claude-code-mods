@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.7
+
+- The Settings card shows which model is in use: it is drawn as the primary button, the other one dimmed. On the desktop both looked the same.
+
 ## 1.0.6
 
 - Edit mode on the desktop draws its rows closer together: two cells a row instead of three, near the pitch of the rows outside Edit mode.
