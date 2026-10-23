@@ -9,7 +9,7 @@ import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './pro
 import { MODELS, SWITCHES, isSwitchOn, modelOf } from './settings'
 import type { Criterion } from './status'
 import { appendHistory, compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom, yourMoveFrom } from './status'
-import { activeOf, applyPlan, describeChanges, mergeDraft, moveTask, openTodos, ownedBy, ownerOf, planDrop, progress, replaceList, setArchived, shownStatus } from './tree'
+import { activeOf, applyPlan, describeChanges, mergeDraft, moveTask, newTodos, openTodos, ownedBy, ownerOf, planDrop, progress, replaceList, setArchived, shownStatus } from './tree'
 import type { PlanCall } from './tree'
 
 const PANE = 'session-glance'
@@ -218,12 +218,12 @@ async function lastOpenTodos($: EngineInterface, currentId: string): Promise<Tas
 
 /** Takes the offered to-dos into this session's card and tells the agent; the old session keeps its own copy. */
 async function bringTodos($: EngineInterface): Promise<void> {
-  const offered = await read($, carryOffer)
+  const offered = newTodos(await read($, carryOffer), await read($, tasks))
   await update($, carryOffer, () => [])
   if (offered.length === 0) {
     return
   }
-  await update($, tasks, list => [...list, ...offered.filter(task => !list.some(one => one.id === task.id))])
+  await update($, tasks, list => [...list, ...newTodos(offered, list)])
   const subjects = offered.filter(task => task.parentId === undefined).map(task => `"${task.subject}"`)
   await tellModel($, `The user brought their open to-dos from the last session in this project: ${subjects.join(', ')}. They are theirs to do, not yours.`)
   await save($)
@@ -907,7 +907,8 @@ export const register: Register = (on, options) => {
       showSettings: await read($, isSettingsOpen),
       nextMove: await read($, moveSuggestion),
       archiveOwners: await read($, openArchives),
-      carried: await read($, carryOffer),
+      // A to-do the card already holds (the same one, or a demo's) is not offered again.
+      carried: newTodos(await read($, carryOffer), await read($, tasks)),
       history: await read($, history),
       showHistory: await read($, isHistoryOpen),
       settingRows: SWITCHES.map(row => ({ key: row.key, label: row.label, hint: row.hint, isOn: isSwitchOn(options, row.key) })),

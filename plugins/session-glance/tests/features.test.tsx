@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { infoIcon } from '../hooks/icons'
 import { summaryPrompt } from '../hooks/prompts'
 import { HISTORY_SIZE, appendHistory, compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, yourMoveFrom } from '../hooks/status'
-import { activeOf, applyPlan, describeChanges, moveTask, openTodos, setArchived } from '../hooks/tree'
+import { activeOf, applyPlan, describeChanges, moveTask, newTodos, openTodos, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
@@ -500,6 +500,7 @@ test('a new session offers the open to-dos the last session in this project left
   expect(await pane.find({ type: 'Text', text: 'Reply to the agency' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: 'Agent work' })).toBeUndefined()
   await pane.unmount()
+  expect(newTodos(openTodos(old.tasks as never), [{ id: 'user-7', subject: 'push develop', status: 'pending', owner: 'user' }] as never)).toEqual([])
   expect(JSON.stringify(session.appended())).toContain('brought their open to-dos')
   expect(openTodos(old.tasks as never).map(task => task.id)).toEqual(['user-1', 'user-1a'])
   root = '/work/none'

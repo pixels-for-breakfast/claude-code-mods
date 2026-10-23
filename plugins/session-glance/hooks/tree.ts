@@ -241,6 +241,14 @@ export function openTodos(all: readonly Task[]): Task[] {
   return [...mains, ...open.filter(task => mains.some(main => main.id === task.parentId))]
 }
 
+/** The offered to-dos this card does not hold yet (by id or wording), with their subtasks. */
+export function newTodos(offered: readonly Task[], list: readonly Task[]): Task[] {
+  const isHeld = (task: Task) => list.some(one => one.id === task.id || one.subject.toLowerCase() === task.subject.toLowerCase())
+  const mains = offered.filter(task => task.parentId === undefined && !isHeld(task))
+
+  return [...mains, ...offered.filter(task => mains.some(main => main.id === task.parentId))]
+}
+
 /** A step of the desktop app's task list (`update_plan`): its text and status. */
 export type PlanItem = { content: string; status: TaskStatus }
 
