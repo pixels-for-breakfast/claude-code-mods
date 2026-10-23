@@ -54,6 +54,8 @@ export type PaneView = {
   showSettings: boolean
   nextMove: string
   archiveOwners: Owner[]
+  /** Open to-dos from the last session in this project, offered in the You card. */
+  carried: Task[]
   settingRows: SettingRow[]
 }
 
@@ -77,6 +79,8 @@ export type PaneActions = {
   restore: (task: Task) => unknown
   add: (value: string, owner: Owner) => unknown
   acceptMove: () => unknown
+  bringTodos: () => unknown
+  ignoreTodos: () => unknown
   dismissMove: () => unknown
   useTitle: () => unknown
   dismissTitle: () => unknown
@@ -94,7 +98,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
   const {
     isTerminal, fields, criteria, isReached, drift, cost, suggestion, chosenTitle, busy, checking, stored, managing, editedCard,
     helpOpen, adds, mineAdds, selected, subtaskAdds, foldedIds, showSummary, showTasks, showMine, showSettings, nextMove,
-    archiveOwners, settingRows,
+    archiveOwners, carried, settingRows,
   } = view
   const hasSummary = Object.keys(fields).length > 0
   const type = TYPE
@@ -281,6 +285,12 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
           </Box>,
           () => act.toggleCard(owner),
         )}
+        {isOpen && isMine && carried.length > 0 && !isEditing && (() => {
+          const mains = carried.filter(task => task.parentId === undefined)
+          const label = mains.length === 1 ? '1 open to-do from your last session here' : `${mains.length} open to-dos from your last session here`
+
+          return suggestionBox(label, mains.map(task => task.subject).join(' · '), 'bring-todos', 'Bring them', act.bringTodos, 'ignore-todos', act.ignoreTodos)
+        })()}
         {isOpen && isMine && nextMove !== '' && !isEditing && suggestionBox('Your next step?', nextMove, 'add-move', 'Add', act.acceptMove, 'dismiss-move', act.dismissMove)}
         {isOpen && rows.length === 0 && note(isMine ? 'Nothing for you yet.' : 'No tasks yet.')}
         {isOpen && isEditing && Client && rows.length > 0 && (

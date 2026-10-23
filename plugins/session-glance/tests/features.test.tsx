@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { infoIcon } from '../hooks/icons'
 import { summaryPrompt } from '../hooks/prompts'
 import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom } from '../hooks/status'
-import { activeOf, describeChanges, moveTask, setArchived } from '../hooks/tree'
+import { activeOf, describeChanges, moveTask, openTodos, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
@@ -466,4 +466,55 @@ test('Edit mode keeps one line about nesting; a click on the info mark shows the
     await pane.unmount()
   }
   expect(infoIcon(true)).toContain('#d97757')
+})
+
+test('a new session offers the open to-dos the last session in this project left', async ($, on) => {
+  const old = {
+    root: '/work/site',
+    tasks: [
+      { id: 'user-1', subject: 'Push develop', status: 'pending', owner: 'user' },
+      { id: 'user-1a', subject: 'Tag the release', status: 'pending', owner: 'user', parentId: 'user-1' },
+      { id: 'user-2', subject: 'Reply to the agency', status: 'completed', owner: 'user' },
+      { id: 'user-3', subject: 'Old idea', status: 'pending', owner: 'user', archived: true },
+      { id: 't1', subject: 'Agent work', status: 'pending' },
+    ],
+  }
+  const other = { root: '/work/other', tasks: [{ id: 'user-9', subject: 'Elsewhere', status: 'pending', owner: 'user' }] }
+  mock.store(on, { sessions: ['s1', 's0'], 'session:s1': old, 'session:s0': other })
+  const session = mock.session(on)
+  let root = '/work/site'
+  on('session.id', async () => ({ value: 's2' }))
+  on('session.root', async () => ({ value: root }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('prompt.submit', async (_$, e) => ({ text: e.text }))
+
+  await $.prompt.submit({ text: 'hi' } as never)
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: '1 open to-do from your last session here' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Push develop' })).toBeDefined()
+  await pane.press({ key: 'bring-todos' })
+  expect(await pane.find({ type: 'Text', text: /open to-do from your last session/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Tag the release' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Reply to the agency' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Agent work' })).toBeUndefined()
+  await pane.unmount()
+  expect(JSON.stringify(session.appended())).toContain('brought their open to-dos')
+  expect(openTodos(old.tasks as never).map(task => task.id)).toEqual(['user-1', 'user-1a'])
+  root = '/work/none'
+})
+
+test('no offer in a project without an earlier session, or in a session that was saved before', async ($, on) => {
+  mock.store(on, { sessions: ['s1'], 'session:s1': { root: '/work/site', tasks: [{ id: 'user-1', subject: 'Push develop', status: 'pending', owner: 'user' }] } })
+  let id = 's2'
+  on('session.id', async () => ({ value: id }))
+  on('session.root', async () => ({ value: '/work/elsewhere' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('prompt.submit', async (_$, e) => ({ text: e.text }))
+  await $.prompt.submit({ text: 'hi' } as never)
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: /from your last session/ })).toBeUndefined()
+  id = 's1'
+  await $.prompt.submit({ text: 'back' } as never)
+  expect(await pane.find({ type: 'Text', text: /from your last session/ })).toBeUndefined()
+  await pane.unmount()
 })

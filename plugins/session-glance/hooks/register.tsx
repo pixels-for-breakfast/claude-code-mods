@@ -9,7 +9,7 @@ import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './pro
 import { MODELS, SWITCHES, isSwitchOn, modelOf } from './settings'
 import type { Criterion } from './status'
 import { compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom } from './status'
-import { activeOf, describeChanges, mergeDraft, moveTask, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
+import { activeOf, describeChanges, mergeDraft, moveTask, openTodos, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
 
 const PANE = 'session-glance'
 const summary = atom({ plugin: 'session-glance', key: 'summary' } as const, '')
@@ -55,6 +55,8 @@ const hasSelection = atom({ plugin: 'session-glance', key: 'hasSelection' } as c
 /** The cards whose Archived fold is open. */
 const openArchives = atom({ plugin: 'session-glance', key: 'openArchives' } as const, [] as Owner[])
 const isSettingsOpen = atom({ plugin: 'session-glance', key: 'isSettingsOpen' } as const, false)
+/** Open to-dos from the last session in this project, offered once when a new session starts. */
+const carryOffer = atom({ plugin: 'session-glance', key: 'carryOffer' } as const, [] as Task[])
 /** How often the selection is checked for the band's buttons. */
 const SELECTION_POLL_MS = 400
 
@@ -82,6 +84,8 @@ const SNAPSHOT_INDEX = 'sessions'
 const KEEP_SESSIONS = 30
 
 export type Snapshot = {
+  /** The project the session ran in, so a new session there can offer what was left open. */
+  root: string
   summary: string
   title: string
   tasks: Task[]
@@ -97,6 +101,7 @@ export type Snapshot = {
 
 /** A pane with nothing in it: what /clear and /glance purge leave, and the base a saved pane is read over. */
 const EMPTY_SNAPSHOT: Snapshot = {
+  root: '',
   summary: '',
   title: '',
   tasks: [],
@@ -110,8 +115,18 @@ const EMPTY_SNAPSHOT: Snapshot = {
   dismissedMoves: [],
 }
 
+/** The session's project; empty where the host cannot say, which matches no other session. */
+async function projectRoot($: EngineInterface): Promise<string> {
+  try {
+    return await $.session.root()
+  } catch {
+    return ''
+  }
+}
+
 async function readSnapshot($: EngineInterface): Promise<Snapshot> {
   return {
+    root: await projectRoot($),
     summary: await read($, summary),
     title: await read($, title),
     tasks: await read($, tasks),
@@ -164,6 +179,33 @@ async function save($: EngineInterface): Promise<void> {
   }
 }
 
+/** The open to-dos of the newest other session saved in this project; none when there is no such session. */
+async function lastOpenTodos($: EngineInterface, currentId: string): Promise<Task[]> {
+  const root = await projectRoot($)
+  const ids = ((await $.store.get(SNAPSHOT_INDEX)) as string[] | undefined) ?? []
+  for (const id of [...ids].reverse()) {
+    const saved = (await $.store.get(`${SNAPSHOT_PREFIX}${id}`)) as Partial<Snapshot> | undefined
+    if (root !== '' && id !== currentId && saved?.root === root) {
+      return openTodos(saved.tasks ?? [])
+    }
+  }
+
+  return []
+}
+
+/** Takes the offered to-dos into this session's card and tells the agent; the old session keeps its own copy. */
+async function bringTodos($: EngineInterface): Promise<void> {
+  const offered = await read($, carryOffer)
+  await update($, carryOffer, () => [])
+  if (offered.length === 0) {
+    return
+  }
+  await update($, tasks, list => [...list, ...offered.filter(task => !list.some(one => one.id === task.id))])
+  const subjects = offered.filter(task => task.parentId === undefined).map(task => `"${task.subject}"`)
+  await tellModel($, `The user brought their open to-dos from the last session in this project: ${subjects.join(', ')}. They are theirs to do, not yours.`)
+  await save($)
+}
+
 /** Loads this session's saved pane once per session id: /resume and a restart bring it back, /clear starts empty. */
 async function restore($: EngineInterface): Promise<void> {
   try {
@@ -178,6 +220,12 @@ async function restore($: EngineInterface): Promise<void> {
       // Read over the empty pane, so a pane saved by an older version gets the fields it lacks.
       await applySnapshot($, { ...EMPTY_SNAPSHOT, ...saved })
       await update($, lastAnswer, () => '')
+    }
+    // A session with nothing saved is new: offer what the last one in this project left open.
+    await update($, carryOffer, () => [])
+    if (saved === undefined) {
+      const left = await lastOpenTodos($, id)
+      await update($, carryOffer, () => left)
     }
     await update($, restoredFor, () => id)
   } catch {
@@ -833,6 +881,7 @@ export const register: Register = (on, options) => {
       showSettings: await read($, isSettingsOpen),
       nextMove: await read($, moveSuggestion),
       archiveOwners: await read($, openArchives),
+      carried: await read($, carryOffer),
       settingRows: SWITCHES.map(row => ({ key: row.key, label: row.label, hint: row.hint, isOn: isSwitchOn(options, row.key) })),
     }
     const toggle = (id: string) => (ids: string[]) => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id])
@@ -856,6 +905,8 @@ export const register: Register = (on, options) => {
       restore: task => restoreTask($, task),
       add: (value, owner) => addTask($, value, owner),
       acceptMove: () => acceptMove($),
+      bringTodos: () => bringTodos($),
+      ignoreTodos: () => update($, carryOffer, () => []),
       dismissMove: () => dismissMove($),
       useTitle: () => useSuggestion($),
       dismissTitle: () => dismissSuggestion($),

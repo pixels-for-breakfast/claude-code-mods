@@ -42,6 +42,7 @@ declare module 'claude-code' {
       isSettingsOpen: boolean
       editingOwner: Owner
       isHelpOpen: boolean
+      carryOffer: Task[]
     }
   }
 }

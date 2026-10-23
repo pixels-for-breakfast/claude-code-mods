@@ -232,3 +232,11 @@ export function describeChanges(before: readonly Task[], after: readonly Task[])
 
   return parts.length === 0 ? '' : `The user edited the session checklist: ${parts.join('; ')}.`
 }
+
+/** The person's open to-dos worth bringing into a new session: open main to-dos, with their open subtasks. */
+export function openTodos(all: readonly Task[]): Task[] {
+  const open = activeOf(ownedBy(all, 'user')).filter(task => task.status !== 'completed')
+  const mains = open.filter(task => task.parentId === undefined)
+
+  return [...mains, ...open.filter(task => mains.some(main => main.id === task.parentId))]
+}

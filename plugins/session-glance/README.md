@@ -56,6 +56,8 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 - **Your next step?** appears in your card when the conversation leaves the next move to you, such as pushing a branch or answering a question. **Add** puts it in your to-dos; **Dismiss** keeps it from being offered again.
 - Every change you make is passed to the agent, so it works from the same lists. A to-do in your card reaches it as a note, not as work for it.
 
+**Open to-dos carry over.** When a new session starts in a project where an earlier session left to-dos of yours open, your card offers them: **Bring them** adds them (with their open subtasks) and tells the agent they are yours; **Dismiss** leaves them behind. The earlier session keeps its own copy.
+
 The pane is saved per session: `/resume` and a restart bring it back, `/clear` starts it empty. A compaction is told to keep the goal and done-when.
 
 ## Settings
