@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.4
+
+- `/glance demo` also shows a title suggestion, so the demo covers every state the Status card can show.
+
 ## 1.0.3
 
 - A listing icon (`.claude-plugin/icon.png`): the pane beside the chat, with its checkboxes in each state.

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderSurface, ToolCallResult } from 'claude-code'
 
 import type { HistoryEntry, Owner, Spent, Task } from '../types'
-import { DEMO_FOLDED, DEMO_HISTORY, DEMO_SUMMARY, DEMO_TASKS, DEMO_TITLE } from './demo'
+import { DEMO_FOLDED, DEMO_HISTORY, DEMO_SUGGESTION, DEMO_SUMMARY, DEMO_TASKS, DEMO_TITLE } from './demo'
 import { drawBand, drawPane } from './pane'
 import type { BandView, PaneView } from './pane'
 import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './prompts'
@@ -691,6 +691,7 @@ export const register: Register = (on, options) => {
         folded: DEMO_FOLDED,
         ticked: [],
         titleAnchor: DEMO_TITLE,
+        titleSuggestion: DEMO_SUGGESTION,
         moveSuggestion: 'Push the branch',
         history: DEMO_HISTORY,
       })

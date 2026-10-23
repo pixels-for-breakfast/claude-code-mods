@@ -25,6 +25,8 @@ export const DEMO_TASKS: Task[] = [
  * subtasks, and a folded one (DEMO_FOLDED).
  */
 export const DEMO_TITLE = 'Session glance demo'
+/** A title the work has moved on to, so the demo shows the Status card's title suggestion too. */
+export const DEMO_SUGGESTION = 'Session pane with drag-and-drop editing'
 export const DEMO_SUMMARY = [
   'GOAL: Glanceable status and checklist beside the session',
   'DONE_WHEN: [x] Every task state shows; [ ] Subtasks fold and unfold; [ ] Dragging reorders the list',
