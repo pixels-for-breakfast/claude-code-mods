@@ -20,8 +20,8 @@ const IDLE: DragState = { dragId: '', startX: 0, startY: 0, slot: -1, dx: 0, isM
  * the line where the task will land, on its own: the pane is not redrawn until the
  * drop, as the desktop holds that back while the pointer is captured. Being on top,
  * it also takes the clicks on the task text and posts them to the pane. The row's own
- * buttons (fold, archive, remove) sit in a column beside the layer, so they are real
- * Buttons with their own hover feedback.
+ * buttons (fold, archive, remove) sit in a column beside the layer, so a click reaches
+ * them directly.
  */
 const EditOverlay: ClientModule<OverlayProps, DragState> = (props, surface) => {
   const { Box, Text } = surface.elements

@@ -430,3 +430,19 @@ test('the Settings card switches settings and the model through the config', asy
     ['session-glance.summaryModel', 'sonnet'],
   ])
 })
+
+test('Edit mode opens in one card; the other keeps its tasks and hides its Edit button', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.command.run({ command: 'glance', args: 'demo' } as never)
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  await pane.press({ key: 'toggle-manage-mine' })
+  expect(await pane.find({ type: 'Button', key: 'remove-demo-8' })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'remove-demo-1' })).toBeUndefined()
+  expect(await pane.find({ type: 'Button', key: 'task-demo-1' })).toBeDefined()
+  expect(await pane.find({ type: 'Button', key: 'toggle-manage' })).toBeUndefined()
+  await pane.press({ key: 'cancel-edit-mine' })
+  expect(await pane.find({ type: 'Button', key: 'toggle-manage' })).toBeDefined()
+  await pane.unmount()
+})

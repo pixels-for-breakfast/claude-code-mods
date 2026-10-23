@@ -16,6 +16,8 @@ const isSummaryOpen = atom({ plugin: 'session-glance', key: 'isSummaryOpen' } as
 const isTasksOpen = atom({ plugin: 'session-glance', key: 'isTasksOpen' } as const, true)
 const isPaneOpen = atom({ plugin: 'session-glance', key: 'isPaneOpen' } as const, false)
 const isManaging = atom({ plugin: 'session-glance', key: 'isManaging' } as const, false)
+/** The card in Edit mode; the other one stays as it is meanwhile. */
+const editingOwner = atom({ plugin: 'session-glance', key: 'editingOwner' } as const, 'agent' as Owner)
 const isValidating = atom({ plugin: 'session-glance', key: 'isValidating' } as const, false)
 const addCount = atom({ plugin: 'session-glance', key: 'addCount' } as const, 0)
 const selectedId = atom({ plugin: 'session-glance', key: 'selectedId' } as const, '')
@@ -180,6 +182,12 @@ const FOLD = {
   open: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M4.5 6.5l3.5 3.5 3.5-3.5" fill="none" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   closed: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M6.5 4.5l3.5 3.5-3.5 3.5" fill="none" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 } as const
+
+/** A trash bin and an archive box in the sidebar's grey: drawn as pictures, pressed through the Button laid over each. */
+const TRASH =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M4 4.2l.7 9h6.6l.7-9M6.7 6.6v4.6M9.3 6.6v4.6"/></svg>'
+const ARCHIVE =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="3" rx="0.8"/><path d="M3.2 6v6.5h9.6V6M6.5 8.8h3"/></svg>'
 
 const DEMO_TASKS: Task[] = [
   { id: 'demo-1', subject: 'Sketch the pane layout', status: 'completed' },
@@ -600,11 +608,12 @@ async function moveInDraft($: EngineInterface, task: Task): Promise<void> {
   await update($, selectedId, () => '')
 }
 
-async function startEditing($: EngineInterface): Promise<void> {
+async function startEditing($: EngineInterface, owner: Owner = 'agent'): Promise<void> {
   const current = await read($, tasks)
   await update($, draft, () => current)
   await update($, draftBaseIds, () => current.map(task => task.id))
   await update($, selectedId, () => '')
+  await update($, editingOwner, () => owner)
   await update($, isManaging, () => true)
 }
 
@@ -1089,6 +1098,7 @@ export const register: Register = (on, options) => {
     const Client = 'Client' in table ? table.Client : undefined
     const Input = 'Input' in table ? table.Input : undefined
     const managing = await read($, isManaging)
+    const editedCard = await read($, editingOwner)
     const checking = await read($, isValidating)
     const adds = await read($, addCount)
     const selected = await read($, selectedId)
@@ -1216,22 +1226,15 @@ export const register: Register = (on, options) => {
       )
     }
 
-    /** The buttons of one Edit-mode row, at the row's pitch so they line up with it: fold, archive, remove. */
+    /** The buttons of one Edit-mode row, at the row's pitch so they line up with it: fold, archive, remove; one click each, beside the drag layer. */
     const editControls = (row: Row) => (
       <Box key={`controls-${row.task.id}`} height={rowHeight} alignItems={isTerminal ? 'flex-end' : 'center'} justifyContent="flex-end" gap="sm">
-        {row.children > 0 && (
-          <Button key={`fold-${row.task.id}`} plain dimColor label={foldedIds.includes(row.task.id) ? 'Unfold' : 'Fold'} onPress={() => toggleFold(row.task.id)}>
-            <Text size={type.text}>{foldedIds.includes(row.task.id) ? '▸' : '▾'}</Text>
-          </Button>
-        )}
-        <Button key={`archive-${row.task.id}`} plain dimColor onPress={() => archiveInDraft($, row.task)}>
-          <Text size={type.text}>Archive</Text>
-        </Button>
-        <Button key={`remove-${row.task.id}`} plain dimColor onPress={() => removeFromDraft($, row.task)}>
-          <Text size={type.text} color="error">
-            Remove
-          </Text>
-        </Button>
+        {row.children > 0 &&
+          (foldedIds.includes(row.task.id)
+            ? iconButton(`fold-${row.task.id}`, FOLD.closed, 'expand', '▸', () => toggleFold(row.task.id))
+            : iconButton(`fold-${row.task.id}`, FOLD.open, 'collapse', '▾', () => toggleFold(row.task.id)))}
+        {iconButton(`archive-${row.task.id}`, ARCHIVE, 'Archive', '▤', () => archiveInDraft($, row.task))}
+        {iconButton(`remove-${row.task.id}`, TRASH, 'Remove', '✕', () => removeFromDraft($, row.task))}
       </Box>
     )
 
@@ -1249,8 +1252,8 @@ export const register: Register = (on, options) => {
       const rows = displayRows(list, foldedIds)
       const { done, total } = progress(list)
       const isOpen = isMine ? showMine : showTasks
-      // The Edit-mode hint is said once: in the agent's card, or in yours when the agent has none.
-      const hasHint = !isMine || activeOf(ownedBy(stored, 'agent')).length === 0
+      // One card edits at a time; while it does, the other shows its tasks and no Edit button.
+      const isEditing = managing && editedCard === owner
 
       return (
         <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
@@ -1267,20 +1270,20 @@ export const register: Register = (on, options) => {
                 </Text>
               )}
               {isOpen && !managing && (
-                <Button key={`toggle-manage${suffix}`} plain onPress={() => startEditing($)}>
+                <Button key={`toggle-manage${suffix}`} plain onPress={() => startEditing($, owner)}>
                   <Text size={type.text} color="subtle">
                     Edit
                   </Text>
                 </Button>
               )}
-              {isOpen && managing && (
+              {isOpen && isEditing && (
                 <Button key={`cancel-edit${suffix}`} plain onPress={() => stopEditing($, false)}>
                   <Text size={type.text} color="subtle">
                     Cancel
                   </Text>
                 </Button>
               )}
-              {isOpen && managing && (
+              {isOpen && isEditing && (
                 <Button key={`save-edit${suffix}`} plain onPress={() => stopEditing($, true)}>
                   <Text size={type.text} color="claude" weight="medium">
                     Save
@@ -1290,7 +1293,7 @@ export const register: Register = (on, options) => {
             </Box>,
             () => (isMine ? update($, isMineOpen, open => !open) : update($, isTasksOpen, open => !open)),
           )}
-          {isOpen && isMine && nextMove !== '' && !managing && (
+          {isOpen && isMine && nextMove !== '' && !isEditing && (
             <Box flexDirection="column" gap="xs" marginBottom={airy}>
               <Text size={type.label} color="suggestion">
                 Your next step?
@@ -1311,7 +1314,7 @@ export const register: Register = (on, options) => {
             </Box>
           )}
           {isOpen && rows.length === 0 && note(isMine ? 'Nothing for you yet.' : 'No tasks yet.')}
-          {isOpen && managing && Client && rows.length > 0 && (
+          {isOpen && isEditing && Client && rows.length > 0 && (
             // The rows below hold the icons; the layer on top draws handles and the drop line and takes the clicks.
             // The layer covers the handle and text only; the buttons beside it are real Buttons, one click each.
             <Box gap="sm" minWidth={0}>
@@ -1335,7 +1338,7 @@ export const register: Register = (on, options) => {
             </Box>
           )}
           {isOpen &&
-            managing &&
+            isEditing &&
             Input &&
             rows
               .filter(row => row.task.id === selected)
@@ -1363,13 +1366,13 @@ export const register: Register = (on, options) => {
                   </Box>
                 </Box>
               ))}
-          {isOpen && managing && hasHint && !selected && rows.length > 0 && (
+          {isOpen && isEditing && !selected && rows.length > 0 && (
             <Box marginTop={airy}>
               {note('Drag ⠿ to reorder, sideways to nest or un-nest · click a task to rename, add subtasks or move it to the other card · archive or remove at the right · nothing changes until Save')}
             </Box>
           )}
-          {isOpen && (!managing || !Client) && rows.map((row, i) => taskRow(row, false, i === 0))}
-          {isOpen && !managing && archivedTasks.length > 0 && (
+          {isOpen && (!isEditing || !Client) && rows.map((row, i) => taskRow(row, false, i === 0))}
+          {isOpen && !isEditing && archivedTasks.length > 0 && (
             <Box flexDirection="column" gap="xs" marginTop={airy}>
               <Button
                 key={`toggle-archived${suffix}`}

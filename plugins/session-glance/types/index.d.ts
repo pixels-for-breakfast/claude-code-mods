@@ -40,6 +40,7 @@ declare module 'claude-code' {
       hasSelection: boolean
       openArchives: Owner[]
       isSettingsOpen: boolean
+      editingOwner: Owner
     }
   }
 }
