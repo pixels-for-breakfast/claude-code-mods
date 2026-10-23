@@ -45,6 +45,7 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 | `/glance refresh` | Updates the status from the last answer (for when automatic updates are off) |
 | `/glance purge` | Clears the status, title and every task, after asking |
 | `/glance demo` | Fills the pane with a demo of every state it can show |
+| `/glance mode smart\|manual` | Switches between Smart and Manual (see Settings) |
 
 **Status card**
 
@@ -81,13 +82,23 @@ Set them in the **Settings** card at the bottom of the pane, in the config menu 
 
 <p><img src="../../docs/session-glance/settings.png" alt="The Settings card, with the session's calls and tokens in its header and Haiku as the model in use" width="380"></p>
 
+**Mode** sets how much the mod does for you. **Smart** (the default) has the model write the status after every answer and check the tasks you type. **Manual** makes no model calls: the pane keeps the agent's tasks and your to-dos as you track them, and **● your move** still shows when an answer ends on a question. In Manual the Smart settings below are hidden and keep their values for when you switch back; `/glance refresh` still updates the status when you ask for it.
+
+**Show** hides a card you don't need, such as everything but **Your to-dos**. A hidden card's count leaves the band above the prompt too. The Settings card always shows.
+
 | Setting | Default | Command | What it does |
 | --- | --- | --- | --- |
+| Mode (`mode`) | `smart` | `/glance mode smart\|manual` | Smart: the model writes the status and checks tasks. Manual: no model calls |
 | Rename the session (`renameSession`) | off | `/glance rename on\|off` | Sets the session's title to the status title at every prompt |
 | Suggest a new title (`suggestTitle`) | on | `/glance suggest on\|off` | Suggests a title when the work moves away from the current one; only while renaming is off |
 | Update the status after every answer (`autoSummary`) | on | `/glance auto on\|off` | Off: the status only changes on `/glance refresh` |
 | Check tasks you type (`checkTasks`) | on | `/glance check on\|off` | Off: typed tasks are added as typed, without a model call |
 | Model (`summaryModel`) | `haiku` | `/glance model haiku\|sonnet` | The model for the status and the task check |
+| Show the Status card (`showStatus`) | on | `/glance show-status on\|off` | Off hides the card; the band still shows the title |
+| Show the Agent tasks card (`showAgentTasks`) | on | `/glance show-tasks on\|off` | Off hides the card and its count in the band |
+| Show the Your to-dos card (`showTodos`) | on | `/glance show-todos on\|off` | Off hides the card and its count in the band |
+
+Rename, suggest, auto, check and model act in Smart mode only.
 
 ## Privacy and cost
 
@@ -105,6 +116,7 @@ The status and the task check are model calls made through your own Claude Code 
 
 What each setting changes:
 
+- **Mode** Manual: no model calls at all, apart from `/glance refresh` when you ask for one.
 - **Update after every answer** off: no status call per turn, so almost nothing; `/glance refresh` costs one status call when you ask for it.
 - **Check tasks you type** off: no task-check calls.
 - **Suggest a new title**: about 65 more tokens in per status call, well under 1%.

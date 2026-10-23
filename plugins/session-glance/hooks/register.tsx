@@ -6,7 +6,7 @@ import { DEMO_FOLDED, DEMO_HISTORY, DEMO_SUGGESTION, DEMO_SUMMARY, DEMO_TASKS, D
 import { drawBand, drawPane } from './pane'
 import type { BandView, PaneView } from './pane'
 import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './prompts'
-import { MODELS, SWITCHES, isSwitchOn, modelOf } from './settings'
+import { MODELS, MODES, SWITCHES, isSwitchOn, modeOf, modelOf } from './settings'
 import type { Criterion } from './status'
 import { appendHistory, compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom, yourMoveFrom } from './status'
 import { activeOf, applyPlan, describeChanges, mergeDraft, moveTask, newTodos, openTodos, ownedBy, ownerOf, planDrop, progress, replaceList, setArchived, shownStatus } from './tree'
@@ -71,6 +71,19 @@ const POLL_MS = 400
 
 /** The person's settings (`userConfig`), set by `register` on every load; a change in the config menu reloads it. */
 const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true, isTitleSuggest: true }
+
+/** The mod's version from its manifest, read at `session.start` (which a reload runs again); empty until then. */
+let version = ''
+
+async function readVersion($: EngineInterface): Promise<string> {
+  try {
+    const manifest = JSON.parse(await $.fs.read(`${$.plugin.root}/.claude-plugin/plugin.json`)) as { version?: unknown }
+
+    return typeof manifest.version === 'string' ? manifest.version : ''
+  } catch {
+    return ''
+  }
+}
 
 /**
  * Calls the model and adds what the call cost to the session's count, answered or not.
@@ -613,18 +626,22 @@ async function setOption($: EngineInterface, key: string, value: boolean | strin
 }
 
 export const register: Register = (on, options) => {
+  // Manual makes no model calls: the Smart switches keep their values for when Smart comes back.
+  const isSmart = modeOf(options) === 'smart'
+  const isShown = { status: isSwitchOn(options, 'showStatus'), agent: isSwitchOn(options, 'showAgentTasks'), user: isSwitchOn(options, 'showTodos') }
   settings.model = modelOf(options)
-  settings.isAutoSummary = isSwitchOn(options, 'autoSummary')
-  settings.isTaskCheck = isSwitchOn(options, 'checkTasks')
+  settings.isAutoSummary = isSmart && isSwitchOn(options, 'autoSummary')
+  settings.isTaskCheck = isSmart && isSwitchOn(options, 'checkTasks')
   // With renaming on the title already follows the work, so there is nothing to suggest.
-  settings.isTitleSuggest = isSwitchOn(options, 'suggestTitle') && !isSwitchOn(options, 'renameSession')
+  settings.isTitleSuggest = isSmart && isSwitchOn(options, 'suggestTitle') && !isSwitchOn(options, 'renameSession')
 
   on('session.start', async ($, e, next) => {
+    version = await readVersion($)
     await restore($)
     // A reload runs session.start again and cancels the old timer with the old module.
     // The id is checked too: a resumed session starts under a passing id and takes its own a moment later.
     $.clock.every(POLL_MS, () => void restore($).then(() => checkSelection($)))
-    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance task|todo` adds the selected text, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance rename|suggest|auto|check on|off`, `/glance model haiku|sonnet`)' })
+    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance task|todo` adds the selected text, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance mode smart|manual`, `/glance rename|suggest|auto|check on|off`, `/glance show-status|show-tasks|show-todos on|off`, `/glance model haiku|sonnet`)' })
     void openPane($)
 
     return next(e)
@@ -645,6 +662,18 @@ export const register: Register = (on, options) => {
       }
 
       return { text: isOn ? setting.on : setting.off }
+    }
+    if (word === 'mode') {
+      const mode = MODES.find(one => one === value)
+      if (mode === undefined) {
+        return { text: `The pane is in ${modeOf(options)} mode. Use \`/glance mode smart\` or \`/glance mode manual\` to change it.` }
+      }
+      const { deny } = await $.config.set({ key: 'session-glance.mode', value: mode })
+      if (deny !== undefined) {
+        return { text: `Could not change the setting: ${deny}` }
+      }
+
+      return { text: mode === 'manual' ? 'Manual mode: no more model calls; the pane keeps the tasks and to-dos you track.' : 'Smart mode: the status updates and typed tasks are checked again.' }
     }
     if (word === 'model') {
       const model = MODELS.find(one => one === value)
@@ -740,7 +769,7 @@ export const register: Register = (on, options) => {
 
       return { ...result, sessionTitle: chosen }
     }
-    if (!isSwitchOn(options, 'renameSession')) {
+    if (!isSmart || !isSwitchOn(options, 'renameSession')) {
       return result
     }
     const current = await read($, title)
@@ -853,13 +882,15 @@ export const register: Register = (on, options) => {
     const list = await read($, tasks)
     const { done, total } = progress(activeOf(ownedBy(list, 'agent')))
     const mineOpen = progress(activeOf(ownedBy(list, 'user')))
+    // A hidden card's count leaves the band too; a count of 0 is not drawn.
     const view: BandView = {
       isTerminal: e.surface === 'terminal',
       isOpen,
+      isSmart,
       title: await read($, title),
       done,
-      total,
-      openForYou: mineOpen.total - mineOpen.done,
+      total: isShown.agent ? total : 0,
+      openForYou: isShown.user ? mineOpen.total - mineOpen.done : 0,
       isSelected: await read($, hasSelection),
       // Shown only between turns: while the agent works, it is not the person's move.
       yourMove: e.props.isWorking ? '' : await read($, yourMove),
@@ -914,7 +945,10 @@ export const register: Register = (on, options) => {
       carried: newTodos(await read($, carryOffer), await read($, tasks)),
       history: await read($, history),
       showHistory: await read($, isHistoryOpen),
-      settingRows: SWITCHES.map(row => ({ key: row.key, label: row.label, hint: row.hint, isOn: isSwitchOn(options, row.key) })),
+      settingRows: SWITCHES.map(row => ({ key: row.key, group: row.group, label: row.label, hint: row.hint, isOn: isSwitchOn(options, row.key) })),
+      isSmart,
+      cards: isShown,
+      version,
     }
     const toggle = (id: string) => (ids: string[]) => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id])
 

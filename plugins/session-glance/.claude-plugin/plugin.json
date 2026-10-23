@@ -1,6 +1,6 @@
 {
   "name": "session-glance",
-  "version": "1.0.12",
+  "version": "1.1.0",
   "description": "A pane with a rolling status of the session, the agent's tasks and your own to-dos",
   "author": {
     "name": "Pixels for Breakfast",
@@ -9,6 +9,13 @@
   "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
+    "mode": {
+      "type": "string",
+      "title": "Mode",
+      "description": "smart: the model writes the status and checks typed tasks. manual: no model calls; the pane keeps the agent's tasks and your to-dos as you track them.",
+      "options": ["smart", "manual"],
+      "default": "smart"
+    },
     "renameSession": {
       "type": "boolean",
       "title": "Rename the session",
@@ -39,6 +46,24 @@
       "description": "haiku is fast and cheap; sonnet writes sharper summaries at a higher cost.",
       "options": ["haiku", "sonnet"],
       "default": "haiku"
+    },
+    "showStatus": {
+      "type": "boolean",
+      "title": "Show the Status card",
+      "description": "The goal, done-when criteria, done and next. Off hides the card; the band above the prompt still shows the title.",
+      "default": true
+    },
+    "showAgentTasks": {
+      "type": "boolean",
+      "title": "Show the Agent tasks card",
+      "description": "The agent's own task list. Off hides the card and its count in the band.",
+      "default": true
+    },
+    "showTodos": {
+      "type": "boolean",
+      "title": "Show the Your to-dos card",
+      "description": "Your own to-dos and next-step suggestions. Off hides the card and its count in the band.",
+      "default": true
     }
   }
 }

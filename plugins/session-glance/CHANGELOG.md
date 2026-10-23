@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.1.0
+
+- **Mode** in the Settings card: **Smart** (as before) or **Manual**, which makes no model calls and keeps only what you track by hand. In Manual the Smart settings hide and keep their values. Also `/glance mode smart|manual`.
+- **Show** switches per card: hide the Status, Agent tasks or Your to-dos card, for a pane with only what you need. A hidden card's count leaves the band too. Also `/glance show-status|show-tasks|show-todos on|off`.
+- The Settings card ends with the mod's version, dimmed, read from its own `plugin.json`.
+
 ## 1.0.12
 
 - The status and the task check run at low effort. Measured: the task check writes 56% fewer tokens on Haiku, the status about 15% fewer; on Sonnet the status writes half as much, as it no longer thinks first. The README lists what each call and setting costs.

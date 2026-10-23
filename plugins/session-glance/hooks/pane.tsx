@@ -29,7 +29,7 @@ export function spentLine(cost: Spent): string {
 }
 
 /** One setting row of the Settings card. */
-export type SettingRow = { key: string; label: string; hint: string; isOn: boolean }
+export type SettingRow = { key: string; group: 'smart' | 'card'; label: string; hint: string; isOn: boolean }
 
 /** What the pane draws, read from the state for one render. */
 export type PaneView = {
@@ -65,6 +65,12 @@ export type PaneView = {
   history: HistoryEntry[]
   showHistory: boolean
   settingRows: SettingRow[]
+  /** Smart: the model writes the status; Manual: no model calls, and the Smart settings are hidden. */
+  isSmart: boolean
+  /** Which cards the person chose to show; Settings always shows. */
+  cards: { status: boolean; agent: boolean; user: boolean }
+  /** The mod's version, drawn dim at the bottom of Settings; empty draws nothing. */
+  version: string
 }
 
 /** What a press in the pane runs; each one is a closure over the engine in `register.tsx`. */
@@ -107,7 +113,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
   const {
     isTerminal, fields, criteria, isReached, drift, cost, suggestion, chosenTitle, busy, checking, stored, managing, editedCard,
     helpOpen, adds, mineAdds, selected, subtaskAdds, foldedIds, showSummary, showTasks, showMine, showSettings, nextMove,
-    archiveOwners, carried, history, showHistory, settingRows,
+    archiveOwners, carried, history, showHistory, settingRows, isSmart, cards,
   } = view
   const hasSummary = Object.keys(fields).length > 0
   const type = TYPE
@@ -234,6 +240,49 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
           : iconButton(`fold-${row.task.id}`, FOLD.open, 'collapse', '▾', () => act.toggleFold(row.task.id)))}
       {iconButton(`archive-${row.task.id}`, ARCHIVE, 'Archive', '▤', () => act.archive(row.task))}
       {iconButton(`remove-${row.task.id}`, TRASH, 'Remove', '✕', () => act.remove(row.task))}
+    </Box>
+  )
+
+  /** One On/Off row of the Settings card. */
+  const switchRow = (row: SettingRow) => (
+    <Box key={`setting-row-${row.key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
+      <Box flexDirection="column" flexShrink={1} minWidth={0}>
+        <Text size={type.text}>{row.label}</Text>
+        <Text size={type.label} color="inactive">
+          {row.hint}
+        </Text>
+      </Box>
+      <Button key={`setting-${row.key}`} plain onPress={() => act.setOption(row.key, !row.isOn)}>
+        <Text size={type.text} color={row.isOn ? 'claude' : 'subtle'} weight={row.isOn ? 'medium' : undefined}>
+          {row.isOn ? 'On' : 'Off'}
+        </Text>
+      </Button>
+    </Box>
+  )
+  /** A Settings row that picks one of a few values: the one in use is the primary button, as a desktop draws a plain Button natively and ignores its text color. */
+  const choiceRow = (key: string, label: string, hint: string, choices: readonly string[], current: string) => (
+    <Box key={`setting-row-${key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
+      <Box flexDirection="column" flexShrink={1} minWidth={0}>
+        <Text size={type.text}>{label}</Text>
+        <Text size={type.label} color="inactive">
+          {hint}
+        </Text>
+      </Box>
+      <Box gap="md" alignItems="center">
+        {choices.map(choice => {
+          const name = choice.charAt(0).toUpperCase() + choice.slice(1)
+
+          return current === choice ? (
+            <Button key={`${key === 'summaryModel' ? 'model' : key}-${choice}`} variant="primary" label={name} onPress={() => act.setOption(key, choice)} />
+          ) : (
+            <Button key={`${key === 'summaryModel' ? 'model' : key}-${choice}`} plain dimColor onPress={() => act.setOption(key, choice)}>
+              <Text size={type.text} color="subtle">
+                {name}
+              </Text>
+            </Button>
+          )
+        })}
+      </Box>
     </Box>
   )
 
@@ -410,141 +459,128 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
 
   return (
     <Box flexDirection="column" gap="lg" padding={isTerminal ? 0 : 'md'}>
-      <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-        {header(
-          'toggle-summary',
-          'Status',
-          showSummary,
-          <Box gap="sm" alignItems="center">
-            {note(busy ? 'updating…' : '')}
-            {(hasSummary || stored.length > 0) && !managing && (
-              <Button
-                key="copy-handoff"
-                plain
-                onPress={act.copy}
-              >
-                <Text size={type.text} color="subtle">
-                  Copy
+      {cards.status && (
+        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
+          {header(
+            'toggle-summary',
+            'Status',
+            showSummary,
+            <Box gap="sm" alignItems="center">
+              {note(busy ? 'updating…' : '')}
+              {(hasSummary || stored.length > 0) && !managing && (
+                <Button
+                  key="copy-handoff"
+                  plain
+                  onPress={act.copy}
+                >
+                  <Text size={type.text} color="subtle">
+                    Copy
+                  </Text>
+                </Button>
+              )}
+            </Box>,
+            act.toggleSummary,
+          )}
+          {suggestion !== '' && suggestionBox('Title suggestion', suggestion, 'use-title', 'Use as title', act.useTitle, 'dismiss-title', act.dismissTitle)}
+          {chosenTitle !== '' && note(`Renames the session to "${chosenTitle}" at your next prompt.`)}
+          {showSummary && !hasSummary && (
+            <Text size={type.text} color="inactive">
+              Appears after the first answer.
+            </Text>
+          )}
+          {showSummary &&
+            FIELDS.filter(field => fields[field.key]).map(field => (
+              <Box flexDirection="column" marginBottom={airy}>
+                <Text size={type.label} color={field.color}>
+                  {field.label}
+                </Text>
+                {field.key === 'done_when' ? (
+                  <Box flexDirection="column">
+                    {criteria.map(criterion => (
+                      <Box key={`criterion-row-${criterion.text}`} alignItems="center" gap="sm" minWidth={0}>
+                        {Svg ? (
+                          <Svg source={criterion.isMet ? ICON.completed : ICON.pending} alt={criterion.isMet ? 'met' : 'open'} width={type.icon} height={type.icon} />
+                        ) : (
+                          <Text color="inactive">{criterion.isMet ? GLYPH.completed : GLYPH.pending}</Text>
+                        )}
+                        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                          <Button key={`criterion-${criterion.text}`} plain onPress={() => act.toggleCriterion(criterion)}>
+                            <Text size={type.text} color={criterion.isMet ? 'inactive' : undefined}>
+                              {criterion.text}
+                            </Text>
+                          </Button>
+                        </Box>
+                      </Box>
+                    ))}
+                    {isReached && (
+                      <Text size={type.text} color="success">
+                        Goal reached: wrap up, or set a new goal.
+                      </Text>
+                    )}
+                  </Box>
+                ) : (
+                  <Text size={type.text}>{fields[field.key]}</Text>
+                )}
+              </Box>
+            ))}
+          {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
+          {showSummary && history.length > 1 && (
+            // The newest entry is the Done line above, so the history starts one turn earlier.
+            <Box flexDirection="column" gap="xs" marginTop={airy}>
+              <Button key="toggle-history" plain onPress={act.toggleHistory}>
+                <Text size={type.text} color="inactive">
+                  {`Earlier (${history.length - 1}) ${showHistory ? '▾' : '▸'}`}
                 </Text>
               </Button>
-            )}
-          </Box>,
-          act.toggleSummary,
-        )}
-        {suggestion !== '' && suggestionBox('Title suggestion', suggestion, 'use-title', 'Use as title', act.useTitle, 'dismiss-title', act.dismissTitle)}
-        {chosenTitle !== '' && note(`Renames the session to "${chosenTitle}" at your next prompt.`)}
-        {showSummary && !hasSummary && (
-          <Text size={type.text} color="inactive">
-            Appears after the first answer.
-          </Text>
-        )}
-        {showSummary &&
-          FIELDS.filter(field => fields[field.key]).map(field => (
-            <Box flexDirection="column" marginBottom={airy}>
-              <Text size={type.label} color={field.color}>
-                {field.label}
-              </Text>
-              {field.key === 'done_when' ? (
-                <Box flexDirection="column">
-                  {criteria.map(criterion => (
-                    <Box key={`criterion-row-${criterion.text}`} alignItems="center" gap="sm" minWidth={0}>
-                      {Svg ? (
-                        <Svg source={criterion.isMet ? ICON.completed : ICON.pending} alt={criterion.isMet ? 'met' : 'open'} width={type.icon} height={type.icon} />
-                      ) : (
-                        <Text color="inactive">{criterion.isMet ? GLYPH.completed : GLYPH.pending}</Text>
-                      )}
-                      <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                        <Button key={`criterion-${criterion.text}`} plain onPress={() => act.toggleCriterion(criterion)}>
-                          <Text size={type.text} color={criterion.isMet ? 'inactive' : undefined}>
-                            {criterion.text}
-                          </Text>
-                        </Button>
+              {showHistory &&
+                history
+                  .slice(0, -1)
+                  .reverse()
+                  .map(entry => (
+                    <Box key={`history-${entry.turn}-${entry.done}`} gap="sm" minWidth={0}>
+                      <Text size={type.label} color="inactive">
+                        {`#${entry.turn}`}
+                      </Text>
+                      <Box flexShrink={1} minWidth={0}>
+                        <Text size={type.text} color="inactive">
+                          {entry.done}
+                        </Text>
                       </Box>
                     </Box>
                   ))}
-                  {isReached && (
-                    <Text size={type.text} color="success">
-                      Goal reached: wrap up, or set a new goal.
-                    </Text>
-                  )}
-                </Box>
-              ) : (
-                <Text size={type.text}>{fields[field.key]}</Text>
-              )}
             </Box>
-          ))}
-        {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
-        {showSummary && history.length > 1 && (
-          // The newest entry is the Done line above, so the history starts one turn earlier.
-          <Box flexDirection="column" gap="xs" marginTop={airy}>
-            <Button key="toggle-history" plain onPress={act.toggleHistory}>
-              <Text size={type.text} color="inactive">
-                {`Earlier (${history.length - 1}) ${showHistory ? '▾' : '▸'}`}
-              </Text>
-            </Button>
-            {showHistory &&
-              history
-                .slice(0, -1)
-                .reverse()
-                .map(entry => (
-                  <Box key={`history-${entry.turn}-${entry.done}`} gap="sm" minWidth={0}>
-                    <Text size={type.label} color="inactive">
-                      {`#${entry.turn}`}
-                    </Text>
-                    <Box flexShrink={1} minWidth={0}>
-                      <Text size={type.text} color="inactive">
-                        {entry.done}
-                      </Text>
-                    </Box>
-                  </Box>
-                ))}
-          </Box>
-        )}
-      </Box>
+          )}
+        </Box>
+      )}
 
-      {taskCard('agent')}
-      {taskCard('user')}
+      {cards.agent && taskCard('agent')}
+      {cards.user && taskCard('user')}
       <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
         {/* What the mod itself spent sits in the Settings header: visible, without a line of its own under the cards. */}
         {header('toggle-settings', 'Settings', showSettings, cost.calls > 0 ? note(spentLine(cost)) : null, act.toggleSettings)}
+        {showSettings && choiceRow('mode', 'Mode', isSmart ? 'The model writes the status and checks tasks' : 'No model calls: you track tasks and to-dos', ['smart', 'manual'], isSmart ? 'smart' : 'manual')}
+        {showSettings && isSmart && settingRows.filter(row => row.group === 'smart').map(switchRow)}
         {showSettings &&
-          settingRows.map(row => (
-            <Box key={`setting-row-${row.key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
-              <Box flexDirection="column" flexShrink={1} minWidth={0}>
-                <Text size={type.text}>{row.label}</Text>
-                <Text size={type.label} color="inactive">
-                  {row.hint}
-                </Text>
-              </Box>
-              <Button key={`setting-${row.key}`} plain onPress={() => act.setOption(row.key, !row.isOn)}>
-                <Text size={type.text} color={row.isOn ? 'claude' : 'subtle'} weight={row.isOn ? 'medium' : undefined}>
-                  {row.isOn ? 'On' : 'Off'}
-                </Text>
-              </Button>
-            </Box>
-          ))}
+          isSmart &&
+          choiceRow(
+            'summaryModel',
+            'Model',
+            cost.calls > 0 ? `For the status and the task check · ${formatTokens(cost.output)} tokens out so far` : 'For the status and the task check',
+            MODELS,
+            view.model,
+          )}
         {showSettings && (
-          <Box justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
-            <Box flexDirection="column" flexShrink={1} minWidth={0}>
-              <Text size={type.text}>Model</Text>
-              <Text size={type.label} color="inactive">
-                {cost.calls > 0 ? `For the status and the task check · ${formatTokens(cost.output)} tokens out so far` : 'For the status and the task check'}
-              </Text>
-            </Box>
-            <Box gap="md" alignItems="center">
-              {/* The model in use is the primary button: a desktop draws a plain Button natively and ignores its text color. */}
-              {MODELS.map(model =>
-                view.model === model ? (
-                  <Button key={`model-${model}`} variant="primary" label={model === 'haiku' ? 'Haiku' : 'Sonnet'} onPress={() => act.setOption('summaryModel', model)} />
-                ) : (
-                  <Button key={`model-${model}`} plain dimColor onPress={() => act.setOption('summaryModel', model)}>
-                    <Text size={type.text} color="subtle">
-                      {model === 'haiku' ? 'Haiku' : 'Sonnet'}
-                    </Text>
-                  </Button>
-                ),
-              )}
-            </Box>
+          <Text size={type.label} color="inactive">
+            Show
+          </Text>
+        )}
+        {showSettings && settingRows.filter(row => row.group === 'card').map(switchRow)}
+        {/* Set apart from the last setting: more room above, the smallest size, dimmer than the hints. */}
+        {showSettings && view.version !== '' && (
+          <Box marginTop={isTerminal ? 1 : 'md'}>
+            <Text size="footnote" color="inactive" dimColor>
+              {`session-glance ${view.version}`}
+            </Text>
           </Box>
         )}
       </Box>
@@ -553,7 +589,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
 }
 
 /** What the band above the prompt draws. */
-export type BandView = { isTerminal: boolean; isOpen: boolean; title: string; done: number; total: number; openForYou: number; isSelected: boolean; yourMove: string }
+export type BandView = { isTerminal: boolean; isOpen: boolean; isSmart: boolean; title: string; done: number; total: number; openForYou: number; isSelected: boolean; yourMove: string }
 export type BandActions = { togglePane: () => unknown; addSelection: (owner: Owner) => unknown }
 
 /** The band above the prompt: the pane toggle, the selection buttons and a one-line status. */
@@ -589,7 +625,7 @@ export function drawBand(table: ElementTable, view: BandView, act: BandActions):
         </Text>
       )}
       <Text size="footnote" color="inactive" wrap="truncate-end">
-        {current || 'No status yet'}
+        {current || (view.isSmart ? 'No status yet' : '')}
         {total > 0 ? `  ·  ${done}/${total} tasks` : ''}
         {openForYou > 0 ? `  ·  ${openForYou} for you` : ''}
       </Text>
