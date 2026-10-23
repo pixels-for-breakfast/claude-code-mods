@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.12
+
+- The status and the task check run at low effort. Measured: the task check writes 56% fewer tokens on Haiku, the status about 15% fewer; on Sonnet the status writes half as much, as it no longer thinks first. The README lists what each call and setting costs.
+
 ## 1.0.11
 
 - `/glance demo` shows all three earlier turns under **Earlier (3)**. Its history now ends with the turn the Done line describes, as a real session's does; before, the newest earlier turn was taken for the Done line and left out.

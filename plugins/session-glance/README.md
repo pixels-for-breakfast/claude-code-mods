@@ -96,9 +96,24 @@ The status and the task check are model calls made through your own Claude Code 
 - **After each answered turn** (unless automatic updates are off): the previous status, your last prompt (first 4,000 characters) and the answer (first 8,000 characters). Subagent turns are skipped.
 - **When you add or rename a task** (unless the task check is off): the typed text, the session goal and the current task list.
 
-**What it costs.** Measured over 57 calls in five working sessions (October 2026, Haiku): a call takes about 1,200 tokens in and 1,100 out, so about **$0.0007 a call, or 7 cents per 100 answered turns**, at Haiku 5.5's API price ($0.10 / $0.50 per million tokens). Most of the output is the model's thinking, which is billed as output. With Sonnet 5.5 ($2 / $10) the same calls come to about $0.013 each, $1.34 per 100 turns. Expect one call per answered turn, plus one for each task you type or rename. On a Claude subscription the calls count toward your usage instead of being billed.
+**What it costs.** Both calls run at low effort, since they only fill in a short form. Measured in October 2026 at API prices (Haiku 5.5 $0.10 / $0.50, Sonnet 5.5 $2 / $10 per million tokens), output tokens include the model's thinking:
 
-Nothing is sent anywhere else. The **Settings** card's header counts every call and its tokens this session. The pane's saved state (status, title, tasks, history and counts, for the 30 most recent sessions, with each session's project folder so a new session can offer what was left open) is kept in the plugin's own store in your Claude Code configuration folder.
+| Call | Haiku (default) | Sonnet |
+| --- | --- | --- |
+| Status, once per answered turn (~1,200 tokens in) | ~920 out: **$0.0006**, 6 cents per 100 turns | ~190 out: $0.004, 43 cents per 100 turns |
+| Task check, once per task you type or rename (~730 in) | ~250 out: **$0.0002** | ~$0.003 (estimated) |
+
+What each setting changes:
+
+- **Update after every answer** off: no status call per turn, so almost nothing; `/glance refresh` costs one status call when you ask for it.
+- **Check tasks you type** off: no task-check calls.
+- **Suggest a new title**: about 65 more tokens in per status call, well under 1%.
+- **Rename the session**: makes no call of its own.
+- **Model** Sonnet: about 7 times the cost of Haiku. Haiku 5.5 thinks even at low effort; Sonnet 5.5 does not, so it writes far less, but each token costs 20 times as much.
+
+On a Claude subscription the calls count toward your usage instead of being billed. The Settings card's header counts this session's calls and tokens.
+
+Nothing is sent anywhere else. The pane's saved state (status, title, tasks, history and counts, for the 30 most recent sessions, with each session's project folder so a new session can offer what was left open) is kept in the plugin's own store in your Claude Code configuration folder.
 
 ## Development
 

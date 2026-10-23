@@ -72,9 +72,12 @@ const POLL_MS = 400
 /** The person's settings (`userConfig`), set by `register` on every load; a change in the config menu reloads it. */
 const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true, isTitleSuggest: true }
 
-/** Calls the model and adds what the call cost to the session's count, answered or not. */
+/**
+ * Calls the model and adds what the call cost to the session's count, answered or not.
+ * Low effort: both calls fill in a short form, and the models think by default, which is billed as output.
+ */
 async function complete($: EngineInterface, request: Omit<ModelCompleteRequest, 'model'>): Promise<ModelCompleteResult> {
-  const reply = await $.model.complete({ ...request, model: settings.model })
+  const reply = await $.model.complete({ ...request, model: settings.model, effort: 'low' })
   const usage = 'usage' in reply ? reply.usage : undefined
   if (usage !== undefined) {
     await update($, spent, total => ({

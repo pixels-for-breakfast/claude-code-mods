@@ -127,7 +127,7 @@ test('the footer counts the calls and tokens the mod spends', async ($, on) => {
   on('session.id', async () => ({ value: 's1' }))
   on('ui.open', async () => ({ value: { isPlaced: true } }))
   const models: string[] = []
-  on('model.complete', async (_$, e) => (models.push(e.model), { value: REPLY }))
+  on('model.complete', async (_$, e) => (models.push(`${e.model}:${e.effort}`), { value: REPLY }))
   on('turn.complete', async () => ({ text: '' }))
   await $.turn.complete({ answer: 'Tests pass.', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   await $.turn.complete({ answer: 'Docs too.', durationMs: 1, isAborted: false, turnId: 't2', reason: 'answer' })
@@ -136,7 +136,7 @@ test('the footer counts the calls and tokens the mod spends', async ($, on) => {
   await pane.press({ key: 'toggle-settings' })
   expect(await pane.find({ type: 'Text', text: /160 tokens out so far/ })).toBeDefined()
   await pane.unmount()
-  expect(models).toEqual(['haiku', 'haiku'])
+  expect(models).toEqual(['haiku:low', 'haiku:low'])
 })
 
 test('with autoSummary off the status waits for /glance refresh, on the chosen model', { options: { autoSummary: false, summaryModel: 'sonnet' } }, async ($, on) => {
