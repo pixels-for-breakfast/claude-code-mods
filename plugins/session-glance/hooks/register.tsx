@@ -18,6 +18,8 @@ const isPaneOpen = atom({ plugin: 'session-glance', key: 'isPaneOpen' } as const
 const isManaging = atom({ plugin: 'session-glance', key: 'isManaging' } as const, false)
 /** The card in Edit mode; the other one stays as it is meanwhile. */
 const editingOwner = atom({ plugin: 'session-glance', key: 'editingOwner' } as const, 'agent' as Owner)
+/** The terminal's stand-in for the Edit-mode tooltip: the full help, shown on request. */
+const isHelpOpen = atom({ plugin: 'session-glance', key: 'isHelpOpen' } as const, false)
 const isValidating = atom({ plugin: 'session-glance', key: 'isValidating' } as const, false)
 const addCount = atom({ plugin: 'session-glance', key: 'addCount' } as const, 0)
 const selectedId = atom({ plugin: 'session-glance', key: 'selectedId' } as const, '')
@@ -188,6 +190,25 @@ const TRASH =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M4 4.2l.7 9h6.6l.7-9M6.7 6.6v4.6M9.3 6.6v4.6"/></svg>'
 const ARCHIVE =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="3" rx="0.8"/><path d="M3.2 6v6.5h9.6V6M6.5 8.8h3"/></svg>'
+
+/** Everything Edit mode can do, for the info icon's tooltip (and the terminal's help line). */
+const EDIT_HELP =
+  'Drag ⠿ up or down to reorder. Drag it right to nest a task under the one above, left to take it out again. ' +
+  'Click a task to rename it, add subtasks or move it to the other card. The box archives a task, the bin removes it. ' +
+  'Nothing changes until Save.'
+
+/** An info mark in the sidebar's grey that lights in the accent under the pointer; its `<title>` is the tooltip. */
+export function infoIcon(tooltip: string): string {
+  const text = tooltip.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+  return (
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><title>${text}</title>` +
+    '<style>svg{cursor:help}svg:hover circle,svg:hover path{stroke:#d97757}svg:hover .dot{fill:#d97757}</style>' +
+    '<circle cx="8" cy="8" r="6.2" fill="none" stroke="#8a8a8a" stroke-width="1.3"/>' +
+    '<path d="M8 7.2v4" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round"/>' +
+    '<circle class="dot" cx="8" cy="4.9" r="0.85" fill="#8a8a8a" stroke="none"/></svg>'
+  )
+}
 
 const DEMO_TASKS: Task[] = [
   { id: 'demo-1', subject: 'Sketch the pane layout', status: 'completed' },
@@ -1099,6 +1120,7 @@ export const register: Register = (on, options) => {
     const Input = 'Input' in table ? table.Input : undefined
     const managing = await read($, isManaging)
     const editedCard = await read($, editingOwner)
+    const helpOpen = await read($, isHelpOpen)
     const checking = await read($, isValidating)
     const adds = await read($, addCount)
     const selected = await read($, selectedId)
@@ -1367,10 +1389,19 @@ export const register: Register = (on, options) => {
                 </Box>
               ))}
           {isOpen && isEditing && !selected && rows.length > 0 && (
-            <Box marginTop={airy}>
-              {note('Drag ⠿ to reorder, sideways to nest or un-nest · click a task to rename, add subtasks or move it to the other card · archive or remove at the right · nothing changes until Save')}
+            // One short line about nesting, the least obvious move; the rest is behind the info mark.
+            <Box marginTop={airy} alignItems="center" gap="sm" minWidth={0}>
+              {Svg ? (
+                <Svg source={infoIcon(EDIT_HELP)} alt={EDIT_HELP} width={type.icon} height={type.icon} isInteractive />
+              ) : (
+                <Button key="edit-help" plain dimColor onPress={() => update($, isHelpOpen, open => !open)}>
+                  <Text size={type.text}>?</Text>
+                </Button>
+              )}
+              <Box flexShrink={1} minWidth={0}>{note('Drag ⠿ right to nest a task under the one above')}</Box>
             </Box>
           )}
+          {isOpen && isEditing && !Svg && helpOpen && !selected && rows.length > 0 && note(EDIT_HELP)}
           {isOpen && (!isEditing || !Client) && rows.map((row, i) => taskRow(row, false, i === 0))}
           {isOpen && !isEditing && archivedTasks.length > 0 && (
             <Box flexDirection="column" gap="xs" marginTop={airy}>

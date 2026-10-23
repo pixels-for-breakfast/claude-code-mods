@@ -41,6 +41,7 @@ declare module 'claude-code' {
       openArchives: Owner[]
       isSettingsOpen: boolean
       editingOwner: Owner
+      isHelpOpen: boolean
     }
   }
 }

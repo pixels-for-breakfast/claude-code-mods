@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { compactNote, describeChanges, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, summaryPrompt } from '../hooks/register'
+import { compactNote, describeChanges, driftNote, formatCriteria, handoffMarkdown, infoIcon, parseCriteria, selectionTask, suggestionFrom, summaryPrompt } from '../hooks/register'
 import { activeOf, moveTask, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
@@ -445,4 +445,25 @@ test('Edit mode opens in one card; the other keeps its tasks and hides its Edit 
   await pane.press({ key: 'cancel-edit-mine' })
   expect(await pane.find({ type: 'Button', key: 'toggle-manage' })).toBeDefined()
   await pane.unmount()
+})
+
+test('Edit mode keeps one line about nesting and puts the rest behind an info mark', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.command.run({ command: 'glance', args: 'demo' } as never)
+  const desktop = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  await desktop.press({ key: 'toggle-manage' })
+  expect(await desktop.find({ type: 'Text', text: 'Drag ⠿ right to nest a task under the one above' })).toBeDefined()
+  expect(await desktop.find({ type: 'Text', text: /Nothing changes until Save/ })).toBeUndefined()
+  await desktop.press({ key: 'cancel-edit' })
+  await desktop.unmount()
+
+  // The terminal draws no pictures: a ? shows the same help as text.
+  const terminal = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  await terminal.press({ key: 'toggle-manage' })
+  await terminal.press({ key: 'edit-help' })
+  expect(await terminal.find({ type: 'Text', text: /Nothing changes until Save/ })).toBeDefined()
+  await terminal.unmount()
+  expect(infoIcon('a < b')).toContain('<title>a &lt; b</title>')
 })
