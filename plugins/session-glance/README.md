@@ -96,6 +96,8 @@ The status and the task check are model calls made through your own Claude Code 
 - **After each answered turn** (unless automatic updates are off): the previous status, your last prompt (first 4,000 characters) and the answer (first 8,000 characters). Subagent turns are skipped.
 - **When you add or rename a task** (unless the task check is off): the typed text, the session goal and the current task list.
 
+**What it costs.** Measured over 57 calls in five working sessions (October 2026, Haiku): a call takes about 1,200 tokens in and 1,100 out, so about **$0.0007 a call, or 7 cents per 100 answered turns**, at Haiku 5.5's API price ($0.10 / $0.50 per million tokens). Most of the output is the model's thinking, which is billed as output. With Sonnet 5.5 ($2 / $10) the same calls come to about $0.013 each, $1.34 per 100 turns. Expect one call per answered turn, plus one for each task you type or rename. On a Claude subscription the calls count toward your usage instead of being billed.
+
 Nothing is sent anywhere else. The **Settings** card's header counts every call and its tokens this session. The pane's saved state (status, title, tasks, history and counts, for the 30 most recent sessions, with each session's project folder so a new session can offer what was left open) is kept in the plugin's own store in your Claude Code configuration folder.
 
 ## Development
