@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- In a wide pane the Settings card has two sections side by side: Mode with the Smart settings and the model, and Show with the card switches. Narrower, they stay one under the other.
+
 ## 1.2.0
 
 - A wide pane lays its cards out side by side. Docked at the top or bottom of the desktop app the pane is about 158 cells wide and 23 high, so stacked cards left most of it empty; from 110 cells wide the shown cards are equal columns, with Settings full width below.

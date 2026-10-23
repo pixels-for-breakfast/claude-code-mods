@@ -265,6 +265,13 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
       card
     )
 
+  /** One section of the Settings card: an equal share of the width when wide, the full width when stacked. */
+  const section = (...rows: RenderChildren[]) => (
+    <Box flexDirection="column" gap="sm" flexGrow={isWide ? 1 : 0} flexShrink={1} width={isWide ? 0 : undefined} minWidth={0}>
+      {rows}
+    </Box>
+  )
+
   /** One On/Off row of the Settings card. */
   const switchRow = (row: SettingRow) => (
     <Box key={`setting-row-${row.key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
@@ -583,23 +590,29 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
       <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
         {/* What the mod itself spent sits in the Settings header: visible, without a line of its own under the cards. */}
         {header('toggle-settings', 'Settings', showSettings, cost.calls > 0 ? note(spentLine(cost)) : null, act.toggleSettings)}
-        {showSettings && choiceRow('mode', 'Mode', isSmart ? 'The model writes the status and checks tasks' : 'No model calls: you track tasks and to-dos', ['smart', 'manual'], isSmart ? 'smart' : 'manual')}
-        {showSettings && isSmart && settingRows.filter(row => row.group === 'smart').map(switchRow)}
-        {showSettings &&
-          isSmart &&
-          choiceRow(
-            'summaryModel',
-            'Model',
-            cost.calls > 0 ? `For the status and the task check · ${formatTokens(cost.output)} tokens out so far` : 'For the status and the task check',
-            MODELS,
-            view.model,
-          )}
+        {/* Two sections, what the mod does and what the pane shows: side by side when wide, one under the other otherwise. */}
         {showSettings && (
-          <Text size={type.label} color="inactive">
-            Show
-          </Text>
+          <Box key="settings-sections" flexDirection={isWide ? 'row' : 'column'} alignItems="stretch" gap={isWide ? 'xl' : 'sm'}>
+            {section(
+              choiceRow('mode', 'Mode', isSmart ? 'The model writes the status and checks tasks' : 'No model calls: you track tasks and to-dos', ['smart', 'manual'], isSmart ? 'smart' : 'manual'),
+              isSmart && settingRows.filter(row => row.group === 'smart').map(switchRow),
+              isSmart &&
+                choiceRow(
+                  'summaryModel',
+                  'Model',
+                  cost.calls > 0 ? `For the status and the task check · ${formatTokens(cost.output)} tokens out so far` : 'For the status and the task check',
+                  MODELS,
+                  view.model,
+                ),
+            )}
+            {section(
+              <Text size={type.label} color="inactive">
+                Show
+              </Text>,
+              settingRows.filter(row => row.group === 'card').map(switchRow),
+            )}
+          </Box>
         )}
-        {showSettings && settingRows.filter(row => row.group === 'card').map(switchRow)}
         {/* Set apart from the last setting: more room above, the smallest size, dimmer than the hints. */}
         {showSettings && view.version !== '' && (
           <Box marginTop={isTerminal ? 1 : 'md'}>
