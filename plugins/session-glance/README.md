@@ -46,7 +46,7 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 - **Off goal** appears when the last turn did something other than the goal. It never interrupts the agent.
 - **Earlier (n)** keeps what each earlier turn did (its Done line, numbered by prompt), newest first, so after a `/resume` you can see how the session got here. It holds the last 50 and is saved with the pane.
 - **Copy** puts the same markdown as `/glance copy` on the clipboard.
-- **Title suggestion** appears when the session's work as a whole has moved away from its title. **Use** sets it as the session title at your next prompt; **Dismiss** keeps it from being offered again.
+- **Title suggestion** appears when the session's work as a whole has moved away from its title. **Use as title** sets it as the session title at your next prompt; **Dismiss** keeps it from being offered again.
 
 **Agent tasks and Your to-dos**
 
@@ -55,7 +55,7 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 - **Edit** opens Edit mode in that card (one card at a time): drag `⠿` to reorder, drag sideways to nest a task under the one above or take it out again, click a task to rename it, add subtasks or move it to the other card (a main task takes its subtasks along), archive it with the box or remove it with the bin at the end of its row. Nothing changes until **Save**.
 - Archived tasks leave the card and its count, and wait under **Archived (n)** at the bottom of the card, with **Restore** for each. An archived task of the agent's stays archived when it rewrites its list.
 - Each card has its own add field. The model tidies the wording and asks when it is unclear or a duplicate.
-- **Your next step?** appears in your card when the conversation leaves the next move to you, such as pushing a branch or answering a question. **Add** puts it in your to-dos; **Dismiss** keeps it from being offered again.
+- **Your next step?** appears in your card when the conversation leaves the next move to you, such as pushing a branch or answering a question. **Add as to-do** puts it in your to-dos; **Dismiss** keeps it from being offered again.
 - Every change you make is passed to the agent, so it works from the same lists. A to-do in your card reaches it as a note, not as work for it.
 
 **Open to-dos carry over.** When a new session starts in a project where an earlier session left to-dos of yours open, your card offers them: **Bring them** adds them (with their open subtasks) and tells the agent they are yours; **Dismiss** leaves them behind. The earlier session keeps its own copy.

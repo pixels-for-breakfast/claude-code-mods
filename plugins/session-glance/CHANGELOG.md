@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5
+
+- Suggestions stand out: a box framed in the accent, a ✦ label, the suggestion in medium weight, the main button drawn as the surface's primary button and Dismiss quieter beside it.
+- The buttons say where a suggestion goes: **Add as to-do** for your next step, **Use as title** for a title suggestion.
+
 ## 1.0.4
 
 - `/glance demo` also shows a title suggestion, so the demo covers every state the Status card can show.
