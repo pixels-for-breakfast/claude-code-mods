@@ -23,6 +23,11 @@ const EDIT_HELP =
 /** Type and spacing: two steps up the API's five sizes (caption, footnote, body, heading, title), for reading at a glance. */
 const TYPE = { text: 'heading', label: 'body', head: 'title', icon: 24, padX: 'xl', padY: 'lg' } as const
 
+/** What the mod's own model calls cost this session: '2 calls · 3.2k tokens'. */
+export function spentLine(cost: Spent): string {
+  return `${cost.calls} ${cost.calls === 1 ? 'call' : 'calls'} · ${formatTokens(cost.input + cost.output)} tokens`
+}
+
 /** One setting row of the Settings card. */
 export type SettingRow = { key: string; label: string; hint: string; isOn: boolean }
 
@@ -502,7 +507,8 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
       {taskCard('agent')}
       {taskCard('user')}
       <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-        {header('toggle-settings', 'Settings', showSettings, null, act.toggleSettings)}
+        {/* What the mod itself spent sits in the Settings header: visible, without a line of its own under the cards. */}
+        {header('toggle-settings', 'Settings', showSettings, cost.calls > 0 ? note(spentLine(cost)) : null, act.toggleSettings)}
         {showSettings &&
           settingRows.map(row => (
             <Box key={`setting-row-${row.key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
@@ -524,7 +530,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
             <Box flexDirection="column" flexShrink={1} minWidth={0}>
               <Text size={type.text}>Model</Text>
               <Text size={type.label} color="inactive">
-                For the status and the task check
+                {cost.calls > 0 ? `For the status and the task check · ${formatTokens(cost.output)} tokens out so far` : 'For the status and the task check'}
               </Text>
             </Box>
             <Box gap="md" alignItems="center">
@@ -539,11 +545,6 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
           </Box>
         )}
       </Box>
-      {cost.calls > 0 && (
-        <Text size="footnote" color="inactive">
-          {`glance: ${cost.calls} ${cost.calls === 1 ? 'call' : 'calls'} · ${formatTokens(cost.input + cost.output)} tokens (${formatTokens(cost.output)} out) · ${view.model}`}
-        </Text>
-      )}
     </Box>
   )
 }

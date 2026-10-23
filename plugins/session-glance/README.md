@@ -47,7 +47,6 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 - **Earlier (n)** keeps what each earlier turn did (its Done line, numbered by prompt), newest first, so after a `/resume` you can see how the session got here. It holds the last 50 and is saved with the pane.
 - **Copy** puts the same markdown as `/glance copy` on the clipboard.
 - **Title suggestion** appears when the session's work as a whole has moved away from its title. **Use** sets it as the session title at your next prompt; **Dismiss** keeps it from being offered again.
-- The footer shows what the mod itself has spent this session: model calls, tokens and the model in use.
 
 **Agent tasks and Your to-dos**
 
@@ -82,7 +81,7 @@ The status and the task check are model calls made through your own Claude Code 
 - **After each answered turn** (unless automatic updates are off): the previous status, your last prompt (first 4,000 characters) and the answer (first 8,000 characters). Subagent turns are skipped.
 - **When you add or rename a task** (unless the task check is off): the typed text, the session goal and the current task list.
 
-Nothing is sent anywhere else. The footer counts every call and its tokens. The pane's saved state (status, title, tasks and counts, for the 30 most recent sessions) is kept in the plugin's own store in your Claude Code configuration folder.
+Nothing is sent anywhere else. The **Settings** card's header counts every call and its tokens this session. The pane's saved state (status, title, tasks, history and counts, for the 30 most recent sessions, with each session's project folder so a new session can offer what was left open) is kept in the plugin's own store in your Claude Code configuration folder.
 
 ## Development
 
@@ -103,6 +102,10 @@ claude plugin test plugins/session-glance
 - `tests/`: `glance.test.tsx` (pane and band), `manage.test.tsx` (Edit mode), `features.test.tsx` (persistence, criteria, copy, settings, title suggestions).
 
 Built against Claude Code 2.1.308. The tests draw the pane for the terminal and the desktop app.
+
+## Changes
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Licence
 
