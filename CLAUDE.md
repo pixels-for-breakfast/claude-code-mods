@@ -30,7 +30,7 @@ claude plugin test plugins/session-glance
 cd plugins/session-glance && deno run -A npm:typescript@5.6.3/tsc -p . --noEmit
 ```
 
-- The only expected validate warning is `ICON_MISSING` (until the listing icon lands).
+- Validate should report no warnings.
 - `hooks/` and `types/` must type-check clean. A few "type instantiation too deep" errors in `tests/` are known.
 
 ## Workflow

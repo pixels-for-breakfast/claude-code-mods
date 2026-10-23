@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- A listing icon (`.claude-plugin/icon.png`): the pane beside the chat, with its checkboxes in each state.
+
 ## 1.0.2
 
 - The Agent tasks card follows the desktop app's own task list too. In the app's Code tab the agent plans with `update_plan` instead of `TaskCreate` or `TodoWrite`, so the card stayed empty there. A new list replaces the plan's steps; `advance`, `done` and `start` move them on. The person's own to-dos stay as they are.
