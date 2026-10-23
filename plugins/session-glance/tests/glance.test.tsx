@@ -56,6 +56,7 @@ test('the pane shows the summary and a checklist of tasks', async ($, on) => {
   const demo = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
   expect(await demo.find({ type: 'Text', text: /Add the toggle above the prompt/ })).toBeDefined()
   expect(await demo.find({ type: 'Text', text: /Session pane with drag-and-drop editing/ })).toBeDefined()
+  expect(await demo.find({ type: 'Text', text: 'Earlier (3) ▸' })).toBeDefined()
   await demo.press({ key: 'task-demo-4' })
   await demo.unmount()
   expect(asked).toEqual(['What should happen to "Seed fake tasks for a demo"?'])

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.11
+
+- `/glance demo` shows all three earlier turns under **Earlier (3)**. Its history now ends with the turn the Done line describes, as a real session's does; before, the newest earlier turn was taken for the Done line and left out.
+
 ## 1.0.10
 
 - The drop line in Edit mode no longer ends in a stray "…" on the desktop: its strokes wrap to a second line the one-row layer clips, instead of being cut with an ellipsis.

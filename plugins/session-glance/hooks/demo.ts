@@ -35,8 +35,10 @@ export const DEMO_SUMMARY = [
 ].join('\n')
 export const DEMO_FOLDED = ['demo-8']
 
+/** Oldest first; the newest entry is the Done line of DEMO_SUMMARY, which the Status card shows above Earlier. */
 export const DEMO_HISTORY: HistoryEntry[] = [
   { turn: 1, done: 'Sketched the pane layout' },
   { turn: 2, done: 'Wrote the summary prompt' },
   { turn: 3, done: 'Drew the toggle button above the prompt' },
+  { turn: 4, done: 'Seeded a demo of everything the pane can show' },
 ]
