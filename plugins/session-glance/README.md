@@ -50,7 +50,7 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 
 - Two cards: the agent's tasks, and the things you have to do yourself. Each has its own progress count; the band above the prompt shows the agent's count and how many to-dos are open for you.
 - Click a task to mark it done, start it or reopen it. A main task with subtasks shows how many are done, and its state follows them.
-- **Edit** opens Edit mode in both cards: drag `⠿` to reorder, drag sideways to nest a task under the one above or take it out again, click a task to rename it, add subtasks or move it to the other card (a main task takes its subtasks along), archive it with the box or remove it with the bin. Nothing changes until **Save**.
+- **Edit** opens Edit mode in both cards: drag `⠿` to reorder, drag sideways to nest a task under the one above or take it out again, click a task to rename it, add subtasks or move it to the other card (a main task takes its subtasks along), archive or remove it with the buttons at the end of its row. Nothing changes until **Save**.
 - Archived tasks leave the card and its count, and wait under **Archived (n)** at the bottom of the card, with **Restore** for each. An archived task of the agent's stays archived when it rewrites its list.
 - Each card has its own add field. The model tidies the wording and asks when it is unclear or a duplicate.
 - **Your next step?** appears in your card when the conversation leaves the next move to you, such as pushing a branch or answering a question. **Add** puts it in your to-dos; **Dismiss** keeps it from being offered again.

@@ -3,11 +3,8 @@ import type { ClientModule } from 'claude-code'
 import type { Task } from '../types'
 import { INDENT_CELLS, displayRows, planDrop } from './tree'
 
-/** Cells the handle takes at a row's left, and the trash, archive button and fold caret at its right, as the pane lays them out. */
+/** Cells the handle takes at a row's left, as the pane lays it out. */
 export const HANDLE_CELLS = 2
-const TRASH_CELLS = 2.5
-const ARCHIVE_CELLS = 2.5
-const FOLD_CELLS = 2.5
 
 /**
  * `hasGapRows`: each row's text sits on its last cell with blank cells above it, plus one
@@ -22,8 +19,9 @@ const IDLE: DragState = { dragId: '', startX: 0, startY: 0, slot: -1, dx: 0, isM
  * A see-through layer over the Edit-mode rows. While a handle is dragged it draws
  * the line where the task will land, on its own: the pane is not redrawn until the
  * drop, as the desktop holds that back while the pointer is captured. Being on top,
- * it also takes the rows' clicks and posts them to the pane by zone: the trash and
- * fold caret at the right, the task text elsewhere.
+ * it also takes the clicks on the task text and posts them to the pane. The row's own
+ * buttons (fold, archive, remove) sit in a column beside the layer, so they are real
+ * Buttons with their own hover feedback.
  */
 const EditOverlay: ClientModule<OverlayProps, DragState> = (props, surface) => {
   const { Box, Text } = surface.elements
@@ -44,20 +42,10 @@ const EditOverlay: ClientModule<OverlayProps, DragState> = (props, surface) => {
     return dx >= INDENT_CELLS ? INDENT_CELLS : dx <= -INDENT_CELLS ? -INDENT_CELLS : 0
   }
 
-  /** A press that did not drag: which control of the row it landed on. */
+  /** A press that did not drag: on the task text it selects the row. */
   const click = (x: number, y: number): void => {
     const row = rows[rowAt(y)]
-    if (row === undefined) {
-      return
-    }
-    const fromRight = surface.columns - x
-    if (fromRight <= TRASH_CELLS) {
-      surface.post({ type: 'remove', id: row.task.id })
-    } else if (fromRight <= TRASH_CELLS + ARCHIVE_CELLS) {
-      surface.post({ type: 'archive', id: row.task.id })
-    } else if (row.children > 0 && fromRight <= TRASH_CELLS + ARCHIVE_CELLS + FOLD_CELLS) {
-      surface.post({ type: 'fold', id: row.task.id })
-    } else if (x > HANDLE_CELLS) {
+    if (row !== undefined && x > HANDLE_CELLS) {
       surface.post({ type: 'select', id: row.task.id })
     }
   }

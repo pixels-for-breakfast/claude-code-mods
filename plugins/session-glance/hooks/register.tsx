@@ -181,14 +181,6 @@ const FOLD = {
   closed: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><path d="M6.5 4.5l3.5 3.5-3.5 3.5" fill="none" stroke="#8a8a8a" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 } as const
 
-/** A trash bin in the sidebar's grey: drawn as a picture, pressed through the Button laid over it. */
-const TRASH =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M4 4.2l.7 9h6.6l.7-9M6.7 6.6v4.6M9.3 6.6v4.6"/></svg>'
-
-/** An archive box in the sidebar's grey, beside the bin in Edit mode. */
-const ARCHIVE =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="3" rx="0.8"/><path d="M3.2 6v6.5h9.6V6M6.5 8.8h3"/></svg>'
-
 const DEMO_TASKS: Task[] = [
   { id: 'demo-1', subject: 'Sketch the pane layout', status: 'completed' },
   { id: 'demo-2', subject: 'Write the summary prompt', status: 'completed' },
@@ -1018,7 +1010,7 @@ export const register: Register = (on, options) => {
       return next(e)
     }
     const owner: Owner = e.element === 'edit-overlay-mine' ? 'user' : 'agent'
-    const data = e.data as { type: 'drop' | 'select' | 'remove' | 'archive' | 'fold'; id: string; slot?: number; dx?: number }
+    const data = e.data as { type: 'drop' | 'select'; id: string; slot?: number; dx?: number }
     const task = (await read($, draft)).find(one => one.id === data.id)
     if (task === undefined) {
       return {}
@@ -1032,14 +1024,8 @@ export const register: Register = (on, options) => {
         ...ownedBy(list, owner).filter(one => one.archived === true),
         ...list.filter(one => ownerOf(one) !== owner),
       ])
-    } else if (data.type === 'select') {
-      await update($, selectedId, current => (current === data.id ? '' : data.id))
-    } else if (data.type === 'remove') {
-      await removeFromDraft($, task)
-    } else if (data.type === 'archive') {
-      await archiveInDraft($, task)
     } else {
-      await update($, folded, ids => (ids.includes(data.id) ? ids.filter(one => one !== data.id) : [...ids, data.id]))
+      await update($, selectedId, current => (current === data.id ? '' : data.id))
     }
 
     return {}
@@ -1225,12 +1211,29 @@ export const register: Register = (on, options) => {
             </Button>
           </Box>
           {row.children > 0 && note(`${row.childrenDone}/${row.children}`)}
-          {fold}
-          {isEditing && iconButton(`archive-${row.task.id}`, ARCHIVE, 'Archive', '▤', () => archiveInDraft($, row.task))}
-          {isEditing && iconButton(`remove-${row.task.id}`, TRASH, 'Remove', '✕', () => removeFromDraft($, row.task))}
+          {!isEditing && fold}
         </Box>
       )
     }
+
+    /** The buttons of one Edit-mode row, at the row's pitch so they line up with it: fold, archive, remove. */
+    const editControls = (row: Row) => (
+      <Box key={`controls-${row.task.id}`} height={rowHeight} alignItems={isTerminal ? 'flex-end' : 'center'} justifyContent="flex-end" gap="sm">
+        {row.children > 0 && (
+          <Button key={`fold-${row.task.id}`} plain dimColor label={foldedIds.includes(row.task.id) ? 'Unfold' : 'Fold'} onPress={() => toggleFold(row.task.id)}>
+            <Text size={type.text}>{foldedIds.includes(row.task.id) ? '▸' : '▾'}</Text>
+          </Button>
+        )}
+        <Button key={`archive-${row.task.id}`} plain dimColor onPress={() => archiveInDraft($, row.task)}>
+          <Text size={type.text}>Archive</Text>
+        </Button>
+        <Button key={`remove-${row.task.id}`} plain dimColor onPress={() => removeFromDraft($, row.task)}>
+          <Text size={type.text} color="error">
+            Remove
+          </Text>
+        </Button>
+      </Box>
+    )
 
     /** One task card: the agent's tasks, or the person's own to-dos. Edit mode covers both cards at once. */
     const taskCard = (owner: Owner) => {
@@ -1310,17 +1313,24 @@ export const register: Register = (on, options) => {
           {isOpen && rows.length === 0 && note(isMine ? 'Nothing for you yet.' : 'No tasks yet.')}
           {isOpen && managing && Client && rows.length > 0 && (
             // The rows below hold the icons; the layer on top draws handles and the drop line and takes the clicks.
-            <Box flexDirection="column" position="relative" minWidth={0}>
-              {rows.map((row, i) => taskRow(row, true, i === 0))}
-              {isTerminal && <Box height={1} />}
-              <Box position="absolute" top={0} left={0} right={0} bottom={0}>
-                <Client
-                  key={`edit-overlay${suffix}`}
-                  module="./task-list.tsx"
-                  props={{ tasks: list, folded: foldedIds, rowHeight, hasGapRows: isTerminal }}
-                  width="100%"
-                  height={Math.ceil(rows.length * rowHeight) + (isTerminal ? 1 : 0)}
-                />
+            // The layer covers the handle and text only; the buttons beside it are real Buttons, one click each.
+            <Box gap="sm" minWidth={0}>
+              <Box flexDirection="column" position="relative" flexGrow={1} flexShrink={1} minWidth={0}>
+                {rows.map((row, i) => taskRow(row, true, i === 0))}
+                {isTerminal && <Box height={1} />}
+                <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+                  <Client
+                    key={`edit-overlay${suffix}`}
+                    module="./task-list.tsx"
+                    props={{ tasks: list, folded: foldedIds, rowHeight, hasGapRows: isTerminal }}
+                    width="100%"
+                    height={Math.ceil(rows.length * rowHeight) + (isTerminal ? 1 : 0)}
+                  />
+                </Box>
+              </Box>
+              <Box flexDirection="column" flexShrink={0}>
+                {rows.map(row => editControls(row))}
+                {isTerminal && <Box height={1} />}
               </Box>
             </Box>
           )}
