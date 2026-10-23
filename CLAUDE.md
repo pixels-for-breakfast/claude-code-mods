@@ -36,7 +36,7 @@ cd plugins/session-glance && deno run -A npm:typescript@5.6.3/tsc -p . --noEmit
 ## Workflow
 
 - Small steps: one change or feature per commit.
-- Per mod change: bump the version in `plugins/<mod>/.claude-plugin/plugin.json`, add a `CHANGELOG.md` entry, tag `<mod>-v<version>` (e.g. `session-glance-v1.0.3`).
+- Per mod change: bump the version in `plugins/<mod>/.claude-plugin/plugin.json`, add a `CHANGELOG.md` entry, tag `<mod>-v<version>` as an annotated tag: `git tag -a -m "<mod> <version>" <mod>-v<version>`. A lightweight tag (`git tag <name>`) is not pushed by `--follow-tags`.
 - Work on a branch named `pfb-<issue>-<slug>` (no personal prefix from Linear), then fast-forward `develop` when done. `develop` is the main branch.
 - A local hook blocks `git push`. Commit and tag, then hand over the push command: `git -C ~/claude-mods push --follow-tags`.
 - Changes are tested live with `/reload-plugins`; the local marketplace reads this folder as it is on disk.
