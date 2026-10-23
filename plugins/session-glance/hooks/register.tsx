@@ -41,6 +41,10 @@ const mineAddCount = atom({ plugin: 'session-glance', key: 'mineAddCount' } as c
 /** The next thing the person must do, as the status model reads the last exchange; offered in the You card. */
 const moveSuggestion = atom({ plugin: 'session-glance', key: 'moveSuggestion' } as const, '')
 const dismissedMoves = atom({ plugin: 'session-glance', key: 'dismissedMoves' } as const, [] as string[])
+/** Whether text is selected on screen now, polled: the API raises no event when a selection changes. */
+const hasSelection = atom({ plugin: 'session-glance', key: 'hasSelection' } as const, false)
+/** How often the selection is checked for the band's buttons. */
+const SELECTION_POLL_MS = 400
 
 /** The person's settings (`userConfig`), set by `register` on every load; a change in the config menu reloads it. */
 const settings = { model: 'haiku', isAutoSummary: true, isTaskCheck: true, isTitleSuggest: true }
@@ -495,6 +499,34 @@ async function addOwnTask($: EngineInterface, subject: string, owner: Owner): Pr
   await save($)
 }
 
+/** The selection as a task text: whitespace folded, cut to what the task check reads. */
+export function selectionTask(text: string | undefined): string {
+  return (text ?? '').replace(/\s+/g, ' ').trim().slice(0, 500)
+}
+
+/** Redraws the band only when text gets selected or the selection goes away. */
+async function checkSelection($: EngineInterface): Promise<void> {
+  try {
+    const isSelected = selectionTask((await $.ui.selection())?.text) !== ''
+    if (isSelected !== (await read($, hasSelection))) {
+      await update($, hasSelection, () => isSelected)
+    }
+  } catch {
+    // A surface that cannot say: the buttons stay hidden.
+  }
+}
+
+/** Adds the current selection as a task for the agent or a to-do of the person's own; false with nothing selected. */
+async function addFromSelection($: EngineInterface, owner: Owner): Promise<boolean> {
+  const text = selectionTask((await $.ui.selection())?.text)
+  if (text === '') {
+    return false
+  }
+  await addTask($, text, owner)
+
+  return true
+}
+
 /** Takes the suggested next step into the You card. */
 async function acceptMove($: EngineInterface): Promise<void> {
   const subject = await read($, moveSuggestion)
@@ -754,7 +786,9 @@ export const register: Register = (on, options) => {
 
   on('session.start', async ($, e, next) => {
     await restore($)
-    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance rename|suggest|auto|check on|off`, `/glance model haiku|sonnet`)' })
+    // A reload runs session.start again and cancels the old timer with the old module.
+    $.clock.every(SELECTION_POLL_MS, () => void checkSelection($))
+    await $.command.register({ name: 'glance', description: 'Toggle the session pane (`/glance copy` copies it as markdown, `/glance refresh` updates the status, `/glance task|todo` adds the selected text, `/glance purge` clears it, `/glance demo` fills in a demo; settings: `/glance rename|suggest|auto|check on|off`, `/glance model haiku|sonnet`)' })
     void openPane($)
 
     return next(e)
@@ -787,6 +821,16 @@ export const register: Register = (on, options) => {
       }
 
       return { text: `The status and task checks use ${model} from now on.` }
+    }
+    if (word === 'task' || word === 'todo') {
+      const owner: Owner = word === 'todo' ? 'user' : 'agent'
+      const isAdded = await addFromSelection($, owner)
+
+      return {
+        text: isAdded
+          ? `Added the selection ${owner === 'user' ? 'to your to-dos' : 'as a task for the agent'}, unless you cancelled the check.`
+          : 'Select some text first, then run it again (the selection is read from the screen).',
+      }
     }
     if (e.args.trim() === 'refresh') {
       return { text: (await summarize($)) ? 'Updated the status from the last answer.' : 'Nothing to update: no answer yet, or the model gave no reply.' }
@@ -962,6 +1006,7 @@ export const register: Register = (on, options) => {
     const mineOpen = progress(ownedBy(list, 'user'))
     const openForYou = mineOpen.total - mineOpen.done
     const current = await read($, title)
+    const isSelected = await read($, hasSelection)
     const toggle = async (): Promise<void> => {
       if (isOpen) {
         // Our own close is not echoed back as a `ui.close` event, so record it here.
@@ -979,6 +1024,20 @@ export const register: Register = (on, options) => {
             {isOpen ? '◂ Hide status' : '▸ Show status'}
           </Text>
         </Button>
+        {isSelected && (
+          <Button key="task-from-selection" plain onPress={() => addFromSelection($, 'agent')}>
+            <Text size="footnote" color="claude">
+              + Task
+            </Text>
+          </Button>
+        )}
+        {isSelected && (
+          <Button key="todo-from-selection" plain onPress={() => addFromSelection($, 'user')}>
+            <Text size="footnote" color="claude">
+              + To-do
+            </Text>
+          </Button>
+        )}
         <Text size="footnote" color="inactive" wrap="truncate-end">
           {current || 'No status yet'}
           {total > 0 ? `  ·  ${done}/${total} tasks` : ''}

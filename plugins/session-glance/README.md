@@ -26,10 +26,14 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
 
 The pane opens at the start of a session. Toggle it with `/glance`, or with the **Show status / Hide status** button above the prompt (`g` in the terminal).
 
+While text is selected on screen, **+ Task** and **+ To-do** appear beside that button: they add the selection as a task for the agent or as a to-do of your own, through the usual task check. The selection is checked a few times a second, because Claude Code raises no event when it changes; where a surface does not report its selection, the buttons stay hidden.
+
 | Command | What it does |
 | --- | --- |
 | `/glance` | Opens or closes the pane |
 | `/glance copy` | Copies the status and both checklists as markdown, for a PR description, a standup or the next session; prints it where no clipboard is reachable |
+| `/glance task` | Adds the selected text as a task for the agent |
+| `/glance todo` | Adds the selected text as a to-do of your own |
 | `/glance refresh` | Updates the status from the last answer (for when automatic updates are off) |
 | `/glance purge` | Clears the status, title and every task, after asking |
 | `/glance demo` | Fills the pane with a demo of every state it can show |

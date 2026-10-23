@@ -37,6 +37,7 @@ declare module 'claude-code' {
       mineAddCount: number
       moveSuggestion: string
       dismissedMoves: string[]
+      hasSelection: boolean
     }
   }
 }

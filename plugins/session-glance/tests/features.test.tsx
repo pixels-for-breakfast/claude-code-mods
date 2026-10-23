@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 
-import { compactNote, describeChanges, driftNote, formatCriteria, handoffMarkdown, parseCriteria, suggestionFrom, summaryPrompt } from '../hooks/register'
+import { compactNote, describeChanges, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, summaryPrompt } from '../hooks/register'
 import { moveTask } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
@@ -312,4 +312,51 @@ test('the status model suggests your next step; Add puts it in your card, Dismis
   await $.turn.complete(turn('Still open.', 't4'))
   expect(await pane.find({ type: 'Text', text: 'Review the PR' })).toBeUndefined()
   await pane.unmount()
+})
+
+const BAND = { hasSurvey: false, isWorking: false, maxRows: 3, bodyColumns: 80 }
+
+test('+ Task and + To-do show next to the toggle only while text is selected', { options: { checkTasks: false } }, async ($, on) => {
+  mock.store(on)
+  const clock = mock.clock(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  let selected: string | undefined
+  on('ui.selection', async () => ({ value: selected === undefined ? undefined : { text: selected } }))
+
+  await $.session.start({ cwd: '/tmp', surface: 'terminal', isInteractive: true })
+  const band = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
+  await clock.advance(400)
+  expect(await band.find({ type: 'Text', text: /\+ Task/ })).toBeUndefined()
+
+  selected = '  Check   the\nfooter spacing  '
+  await clock.advance(400)
+  expect(await band.find({ type: 'Text', text: /\+ To-do/ })).toBeDefined()
+  await band.press({ key: 'todo-from-selection' })
+  expect(await band.find({ type: 'Text', text: /1 for you/ })).toBeDefined()
+  await band.press({ key: 'task-from-selection' })
+  expect(await band.find({ type: 'Text', text: /0\/1 tasks/ })).toBeDefined()
+
+  selected = undefined
+  await clock.advance(400)
+  expect(await band.find({ type: 'Text', text: /\+ Task/ })).toBeUndefined()
+  await band.unmount()
+
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect((await pane.findAll({ type: 'Text', text: 'Check the footer spacing' })).length).toBe(2)
+  await pane.unmount()
+})
+
+test('/glance task and todo add the selection, and say so when nothing is selected', { options: { checkTasks: false } }, async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  let selected: string | undefined
+  on('ui.selection', async () => ({ value: selected === undefined ? undefined : { text: selected } }))
+  expect((await $.command.run({ command: 'glance', args: 'todo' } as never)).text).toContain('Select some text first')
+  selected = 'Review the diff'
+  expect((await $.command.run({ command: 'glance', args: 'todo' } as never)).text).toContain('to your to-dos')
+  expect((await $.command.run({ command: 'glance', args: 'task' } as never)).text).toContain('as a task for the agent')
+  expect(selectionTask(' a\n\n b ')).toBe('a b')
 })
