@@ -1,12 +1,12 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderSurface } from 'claude-code'
+import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderSurface, ToolCallResult } from 'claude-code'
 
 import type { Owner, Spent, Task } from '../types'
 import { DEMO_FOLDED, DEMO_SUMMARY, DEMO_TASKS, DEMO_TITLE } from './demo'
 import { drawBand, drawPane } from './pane'
 import type { BandView, PaneView } from './pane'
 import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './prompts'
-import { MODELS, SWITCHES } from './settings'
+import { MODELS, SWITCHES, isSwitchOn, modelOf } from './settings'
 import type { Criterion } from './status'
 import { compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom } from './status'
 import { activeOf, describeChanges, mergeDraft, moveTask, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
@@ -95,6 +95,56 @@ export type Snapshot = {
   dismissedMoves: string[]
 }
 
+/** A pane with nothing in it: what /clear and /glance purge leave, and the base a saved pane is read over. */
+const EMPTY_SNAPSHOT: Snapshot = {
+  summary: '',
+  title: '',
+  tasks: [],
+  folded: [],
+  ticked: [],
+  spent: { calls: 0, input: 0, output: 0 },
+  titleAnchor: '',
+  titleSuggestion: '',
+  dismissedTitles: [],
+  moveSuggestion: '',
+  dismissedMoves: [],
+}
+
+async function readSnapshot($: EngineInterface): Promise<Snapshot> {
+  return {
+    summary: await read($, summary),
+    title: await read($, title),
+    tasks: await read($, tasks),
+    folded: await read($, folded),
+    ticked: await read($, ticked),
+    spent: await read($, spent),
+    titleAnchor: await read($, titleAnchor),
+    titleSuggestion: await read($, titleSuggestion),
+    dismissedTitles: await read($, dismissedTitles),
+    moveSuggestion: await read($, moveSuggestion),
+    dismissedMoves: await read($, dismissedMoves),
+  }
+}
+
+/** Puts a saved (or empty) pane in place; what the person was in the middle of goes with it. */
+async function applySnapshot($: EngineInterface, snapshot: Snapshot): Promise<void> {
+  await update($, summary, () => snapshot.summary)
+  await update($, title, () => snapshot.title)
+  await update($, tasks, () => snapshot.tasks)
+  await update($, folded, () => snapshot.folded)
+  await update($, ticked, () => snapshot.ticked)
+  await update($, spent, () => snapshot.spent)
+  await update($, titleAnchor, () => snapshot.titleAnchor)
+  await update($, titleSuggestion, () => snapshot.titleSuggestion)
+  await update($, dismissedTitles, () => snapshot.dismissedTitles)
+  await update($, moveSuggestion, () => snapshot.moveSuggestion)
+  await update($, dismissedMoves, () => snapshot.dismissedMoves)
+  await update($, pendingTitle, () => '')
+  await update($, draft, () => [])
+  await update($, selectedId, () => '')
+  await update($, isManaging, () => false)
+}
+
 /** Saves what the pane shows under this session's id, so /resume and a restart bring it back. */
 async function save($: EngineInterface): Promise<void> {
   try {
@@ -103,20 +153,7 @@ async function save($: EngineInterface): Promise<void> {
     if (id !== (await read($, restoredFor))) {
       return
     }
-    const snapshot: Snapshot = {
-      summary: await read($, summary),
-      title: await read($, title),
-      tasks: await read($, tasks),
-      folded: await read($, folded),
-      ticked: await read($, ticked),
-      spent: await read($, spent),
-      titleAnchor: await read($, titleAnchor),
-      titleSuggestion: await read($, titleSuggestion),
-      dismissedTitles: await read($, dismissedTitles),
-      moveSuggestion: await read($, moveSuggestion),
-      dismissedMoves: await read($, dismissedMoves),
-    }
-    await $.store.set(`${SNAPSHOT_PREFIX}${id}`, snapshot)
+    await $.store.set(`${SNAPSHOT_PREFIX}${id}`, await readSnapshot($))
     const ids = [...(((await $.store.get(SNAPSHOT_INDEX)) as string[] | undefined) ?? []).filter(one => one !== id), id]
     for (const old of ids.slice(0, -KEEP_SESSIONS)) {
       await $.store.delete(`${SNAPSHOT_PREFIX}${old}`)
@@ -138,18 +175,8 @@ async function restore($: EngineInterface): Promise<void> {
     const saved = (await $.store.get(`${SNAPSHOT_PREFIX}${id}`)) as Partial<Snapshot> | undefined
     // A first load with nothing saved keeps what is here (an install or upgrade mid-session).
     if (saved !== undefined || previous !== '') {
-      await update($, summary, () => saved?.summary ?? '')
-      await update($, title, () => saved?.title ?? '')
-      await update($, tasks, () => saved?.tasks ?? [])
-      await update($, folded, () => saved?.folded ?? [])
-      await update($, ticked, () => saved?.ticked ?? [])
-      await update($, spent, () => saved?.spent ?? { calls: 0, input: 0, output: 0 })
-      await update($, titleAnchor, () => saved?.titleAnchor ?? '')
-      await update($, titleSuggestion, () => saved?.titleSuggestion ?? '')
-      await update($, dismissedTitles, () => saved?.dismissedTitles ?? [])
-      await update($, moveSuggestion, () => saved?.moveSuggestion ?? '')
-      await update($, dismissedMoves, () => saved?.dismissedMoves ?? [])
-      await update($, pendingTitle, () => '')
+      // Read over the empty pane, so a pane saved by an older version gets the fields it lacks.
+      await applySnapshot($, { ...EMPTY_SNAPSHOT, ...saved })
       await update($, lastAnswer, () => '')
     }
     await update($, restoredFor, () => id)
@@ -480,19 +507,7 @@ async function purge($: EngineInterface): Promise<boolean> {
     return false
   }
   const hadTasks = (await read($, tasks)).length > 0
-  await update($, tasks, () => [])
-  await update($, summary, () => '')
-  await update($, title, () => '')
-  await update($, folded, () => [])
-  await update($, ticked, () => [])
-  await update($, titleAnchor, () => '')
-  await update($, titleSuggestion, () => '')
-  await update($, dismissedTitles, () => [])
-  await update($, moveSuggestion, () => '')
-  await update($, dismissedMoves, () => [])
-  await update($, draft, () => [])
-  await update($, selectedId, () => '')
-  await update($, isManaging, () => false)
+  await applySnapshot($, { ...EMPTY_SNAPSHOT, spent: await read($, spent) })
   if (hadTasks) {
     await tellModel($, 'The user cleared the session checklist; its tasks no longer apply unless they bring them up again.')
   }
@@ -507,6 +522,26 @@ async function openPane($: EngineInterface): Promise<void> {
 }
 
 
+/** A tool call that ran and did not fail: not denied, not an error. */
+function hasRun(ran: ToolCallResult): boolean {
+  return !('deny' in ran && ran.deny !== undefined) && ran.isError !== true
+}
+
+/** The task list after a TodoWrite. Its ids follow the list's order, so an archived one is recognised by its subject. */
+function todoList(list: readonly Task[], todos: readonly { content: string; status: Task['status'] }[]): Task[] {
+  const archivedSubjects = list.filter(task => task.id.startsWith('todo-') && task.archived === true).map(task => task.subject)
+
+  return [
+    ...list.filter(task => !task.id.startsWith('todo-')),
+    ...todos.map((todo, i) => ({
+      id: `todo-${i}`,
+      subject: todo.content,
+      status: todo.status,
+      ...(archivedSubjects.includes(todo.content) ? { archived: true } : {}),
+    })),
+  ]
+}
+
 /** Writes one of the mod's settings; the engine then reloads the module with the new options. */
 async function setOption($: EngineInterface, key: string, value: boolean | string): Promise<void> {
   const { deny } = await $.config.set({ key: `session-glance.${key}`, value })
@@ -516,11 +551,11 @@ async function setOption($: EngineInterface, key: string, value: boolean | strin
 }
 
 export const register: Register = (on, options) => {
-  settings.model = MODELS.find(one => one === options.summaryModel) ?? 'haiku'
-  settings.isAutoSummary = options.autoSummary !== false
-  settings.isTaskCheck = options.checkTasks !== false
+  settings.model = modelOf(options)
+  settings.isAutoSummary = isSwitchOn(options, 'autoSummary')
+  settings.isTaskCheck = isSwitchOn(options, 'checkTasks')
   // With renaming on the title already follows the work, so there is nothing to suggest.
-  settings.isTitleSuggest = options.suggestTitle !== false && options.renameSession !== true
+  settings.isTitleSuggest = isSwitchOn(options, 'suggestTitle') && !isSwitchOn(options, 'renameSession')
 
   on('session.start', async ($, e, next) => {
     await restore($)
@@ -534,13 +569,13 @@ export const register: Register = (on, options) => {
 
   on('command.run', { command: 'glance' }, async ($, e) => {
     const [word, value] = e.args.trim().split(/\s+/)
-    if (word !== undefined && word in SWITCHES) {
+    const setting = SWITCHES.find(one => one.word === word)
+    if (setting !== undefined) {
       // The plugin's own way to its settings: `/config` has two entries in the desktop app, and a recalled line picks the wrong one.
-      const setting = SWITCHES[word as keyof typeof SWITCHES]
       if (value !== undefined && value !== 'on' && value !== 'off') {
-        return { text: `Use \`/glance ${word} on\`, \`/glance ${word} off\`, or \`/glance ${word}\` to switch it.` }
+        return { text: `Use \`/glance ${setting.word} on\`, \`/glance ${setting.word} off\`, or \`/glance ${setting.word}\` to switch it.` }
       }
-      const isOn = value === undefined ? !(word === 'rename' ? options.renameSession === true : options[setting.key] !== false) : value === 'on'
+      const isOn = value === undefined ? !isSwitchOn(options, setting.key) : value === 'on'
       const { deny } = await $.config.set({ key: `session-glance.${setting.key}`, value: isOn })
       if (deny !== undefined) {
         return { text: `Could not change the setting: ${deny}` }
@@ -588,13 +623,16 @@ export const register: Register = (on, options) => {
       return { text: (await purge($)) ? 'Cleared the status, title and every task.' : 'Nothing was cleared.' }
     }
     if (e.args.trim() === 'demo') {
-      await update($, tasks, () => DEMO_TASKS)
-      await update($, summary, () => DEMO_SUMMARY)
-      await update($, title, () => DEMO_TITLE)
-      await update($, folded, () => DEMO_FOLDED)
-      await update($, ticked, () => [])
-      await update($, titleAnchor, () => DEMO_TITLE)
-      await update($, moveSuggestion, () => 'Push the branch')
+      await applySnapshot($, {
+        ...(await readSnapshot($)),
+        tasks: DEMO_TASKS,
+        summary: DEMO_SUMMARY,
+        title: DEMO_TITLE,
+        folded: DEMO_FOLDED,
+        ticked: [],
+        titleAnchor: DEMO_TITLE,
+        moveSuggestion: 'Push the branch',
+      })
       await save($)
       await openPane($)
 
@@ -636,7 +674,7 @@ export const register: Register = (on, options) => {
 
       return { ...result, sessionTitle: chosen }
     }
-    if (options.renameSession !== true) {
+    if (!isSwitchOn(options, 'renameSession')) {
       return result
     }
     const current = await read($, title)
@@ -646,37 +684,25 @@ export const register: Register = (on, options) => {
 
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
-    if ('deny' in ran && ran.deny !== undefined) {
+    // `tool` narrows the input to a call's own fields; a call that did not run changes nothing.
+    if (!hasRun(ran) || !('tool' in e)) {
       return ran
     }
     // Bookkeeping only: a failure here must never fail the tool call it watched.
     try {
-      if (e.tool === 'TaskCreate' && !ran.isError) {
+      if (e.tool === 'TaskCreate') {
         const created = ran.result as { task: { id: string; subject: string } }
         await update($, tasks, list => [...list, { id: created.task.id, subject: created.task.subject, status: 'pending' as const }])
-      } else if (e.tool === 'TaskUpdate' && !ran.isError) {
+      } else if (e.tool === 'TaskUpdate') {
         const { taskId, status, subject } = e
         await update($, tasks, list =>
           status === 'deleted'
             ? list.filter(task => task.id !== taskId)
             : list.map(task => (task.id === taskId ? { ...task, status: status ?? task.status, subject: subject ?? task.subject } : task)),
         )
-      } else if (e.tool === 'TodoWrite' && !ran.isError) {
+      } else if (e.tool === 'TodoWrite') {
         // TodoWrite sends the whole list; the person's own tasks stay.
-        // Ids follow the list's order, so an archived one is recognised by its subject.
-        await update($, tasks, list => {
-          const archivedSubjects = list.filter(task => task.id.startsWith('todo-') && task.archived === true).map(task => task.subject)
-
-          return [
-            ...list.filter(task => !task.id.startsWith('todo-')),
-            ...e.todos.map((todo, i) => ({
-              id: `todo-${i}`,
-              subject: todo.content,
-              status: todo.status,
-              ...(archivedSubjects.includes(todo.content) ? { archived: true } : {}),
-            })),
-          ]
-        })
+        await update($, tasks, list => todoList(list, e.todos))
       }
     } catch {
       // The pane just misses this task change.
@@ -807,12 +833,7 @@ export const register: Register = (on, options) => {
       showSettings: await read($, isSettingsOpen),
       nextMove: await read($, moveSuggestion),
       archiveOwners: await read($, openArchives),
-      settingRows: [
-        { key: 'renameSession', label: 'Rename the session', hint: 'The status title becomes the session title', isOn: options.renameSession === true },
-        { key: 'suggestTitle', label: 'Suggest a new title', hint: 'When the work moves on; only while renaming is off', isOn: options.suggestTitle !== false },
-        { key: 'autoSummary', label: 'Update after every answer', hint: 'Off: only on /glance refresh', isOn: settings.isAutoSummary },
-        { key: 'checkTasks', label: 'Check tasks you type', hint: 'Tidy the wording, ask when unclear', isOn: settings.isTaskCheck },
-      ],
+      settingRows: SWITCHES.map(row => ({ key: row.key, label: row.label, hint: row.hint, isOn: isSwitchOn(options, row.key) })),
     }
     const toggle = (id: string) => (ids: string[]) => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id])
 

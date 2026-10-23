@@ -118,6 +118,27 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
       {aside}
     </Box>
   )
+  /** Something the model suggests, with a button to take it and one to dismiss it for good. */
+  const suggestionBox = (label: string, text: string, acceptKey: string, acceptLabel: string, onAccept: () => unknown, dismissKey: string, onDismiss: () => unknown) => (
+    <Box flexDirection="column" gap="xs" marginBottom={airy}>
+      <Text size={type.label} color="suggestion">
+        {label}
+      </Text>
+      <Text size={type.text}>{text}</Text>
+      <Box gap="md" alignItems="center">
+        <Button key={acceptKey} plain onPress={onAccept}>
+          <Text size={type.text} color="claude" weight="medium">
+            {acceptLabel}
+          </Text>
+        </Button>
+        <Button key={dismissKey} plain onPress={onDismiss}>
+          <Text size={type.text} color="subtle">
+            Dismiss
+          </Text>
+        </Button>
+      </Box>
+    </Box>
+  )
   const note = (text: string) => (
     <Text size={type.text} color="inactive">
       {text}
@@ -260,26 +281,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
           </Box>,
           () => act.toggleCard(owner),
         )}
-        {isOpen && isMine && nextMove !== '' && !isEditing && (
-          <Box flexDirection="column" gap="xs" marginBottom={airy}>
-            <Text size={type.label} color="suggestion">
-              Your next step?
-            </Text>
-            <Text size={type.text}>{nextMove}</Text>
-            <Box gap="md" alignItems="center">
-              <Button key="add-move" plain onPress={act.acceptMove}>
-                <Text size={type.text} color="claude" weight="medium">
-                  Add
-                </Text>
-              </Button>
-              <Button key="dismiss-move" plain onPress={act.dismissMove}>
-                <Text size={type.text} color="subtle">
-                  Dismiss
-                </Text>
-              </Button>
-            </Box>
-          </Box>
-        )}
+        {isOpen && isMine && nextMove !== '' && !isEditing && suggestionBox('Your next step?', nextMove, 'add-move', 'Add', act.acceptMove, 'dismiss-move', act.dismissMove)}
         {isOpen && rows.length === 0 && note(isMine ? 'Nothing for you yet.' : 'No tasks yet.')}
         {isOpen && isEditing && Client && rows.length > 0 && (
           // The rows below hold the icons; the layer on top draws handles and the drop line and takes the clicks.
@@ -412,26 +414,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
           </Box>,
           act.toggleSummary,
         )}
-        {suggestion !== '' && (
-          <Box flexDirection="column" gap="xs" marginBottom={airy}>
-            <Text size={type.label} color="suggestion">
-              Title suggestion
-            </Text>
-            <Text size={type.text}>{suggestion}</Text>
-            <Box gap="md" alignItems="center">
-              <Button key="use-title" plain onPress={act.useTitle}>
-                <Text size={type.text} color="claude" weight="medium">
-                  Use
-                </Text>
-              </Button>
-              <Button key="dismiss-title" plain onPress={act.dismissTitle}>
-                <Text size={type.text} color="subtle">
-                  Dismiss
-                </Text>
-              </Button>
-            </Box>
-          </Box>
-        )}
+        {suggestion !== '' && suggestionBox('Title suggestion', suggestion, 'use-title', 'Use', act.useTitle, 'dismiss-title', act.dismissTitle)}
         {chosenTitle !== '' && note(`Renames the session to "${chosenTitle}" at your next prompt.`)}
         {showSummary && !hasSummary && (
           <Text size={type.text} color="inactive">
