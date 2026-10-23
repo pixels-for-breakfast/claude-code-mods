@@ -240,3 +240,56 @@ export function openTodos(all: readonly Task[]): Task[] {
 
   return [...mains, ...open.filter(task => mains.some(main => main.id === task.parentId))]
 }
+
+/** A step of the desktop app's task list (`update_plan`): its text and status. */
+export type PlanItem = { content: string; status: TaskStatus }
+
+/** The desktop app's task-list call: a whole new list, or moves on the current one (1-based steps). */
+export type PlanCall = { items?: readonly PlanItem[]; advance?: boolean; done?: readonly number[]; start?: number }
+
+/**
+ * Replaces the tasks a tool keeps as a whole list (TodoWrite, update_plan), ids `<prefix><index>`.
+ * Ids follow the list's order, so an archived one is recognised by its subject.
+ */
+export function replaceList(list: readonly Task[], prefix: string, items: readonly PlanItem[]): Task[] {
+  const archivedSubjects = list.filter(task => task.id.startsWith(prefix) && task.archived === true).map(task => task.subject)
+
+  return [
+    ...list.filter(task => !task.id.startsWith(prefix)),
+    ...items.map((item, i) => ({
+      id: `${prefix}${i}`,
+      subject: item.content,
+      status: item.status,
+      ...(archivedSubjects.includes(item.content) ? { archived: true } : {}),
+    })),
+  ]
+}
+
+/** The task list after an `update_plan` call: a new list replaces the plan, `advance` finishes the step in progress and starts the next. */
+export function applyPlan(list: readonly Task[], call: PlanCall): Task[] {
+  const prefix = 'plan-'
+  if (call.items !== undefined) {
+    return replaceList(list, prefix, call.items.filter(item => typeof item?.content === 'string'))
+  }
+  const steps = list.filter(task => task.id.startsWith(prefix))
+  const statusOf = new Map(steps.map(task => [task.id, task.status]))
+  const at = (step: number) => `${prefix}${step - 1}`
+  if (call.advance === true) {
+    const current = steps.findIndex(task => task.status === 'in_progress')
+    const next = steps.findIndex((task, i) => i > current && task.status === 'pending')
+    if (current >= 0) {
+      statusOf.set(steps[current]!.id, 'completed')
+    }
+    if (next >= 0) {
+      statusOf.set(steps[next]!.id, 'in_progress')
+    }
+  }
+  for (const step of call.done ?? []) {
+    statusOf.set(at(step), 'completed')
+  }
+  if (call.start !== undefined) {
+    statusOf.set(at(call.start), 'in_progress')
+  }
+
+  return list.map(task => (statusOf.has(task.id) ? { ...task, status: statusOf.get(task.id)! } : task))
+}

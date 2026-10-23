@@ -3,7 +3,7 @@ import { expect, mock, test } from 'claude-code/testing'
 import { infoIcon } from '../hooks/icons'
 import { summaryPrompt } from '../hooks/prompts'
 import { HISTORY_SIZE, appendHistory, compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, yourMoveFrom } from '../hooks/status'
-import { activeOf, describeChanges, moveTask, openTodos, setArchived } from '../hooks/tree'
+import { activeOf, applyPlan, describeChanges, moveTask, openTodos, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
@@ -608,5 +608,35 @@ test('a resumed session gets its pane back as soon as its own id arrives, before
   await clock.advance(400)
   const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'Pane', requestId: 'session-glance', props: PANE as never })
   expect(await pane.find({ type: 'Text', text: 'Sketch the pane layout' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('applyPlan follows the desktop task list: a new list, advance, done and start', () => {
+  const plan = applyPlan([], {
+    items: [
+      { content: 'Read the code', status: 'in_progress' },
+      { content: 'Fix it', status: 'pending' },
+      { content: 'Test it', status: 'pending' },
+    ],
+  })
+  const statuses = (list: { status: string }[]) => list.map(task => task.status)
+  expect(plan.map(task => task.id)).toEqual(['plan-0', 'plan-1', 'plan-2'])
+  expect(statuses(applyPlan(plan, { advance: true }))).toEqual(['completed', 'in_progress', 'pending'])
+  expect(statuses(applyPlan(plan, { done: [1, 2], start: 3 }))).toEqual(['completed', 'completed', 'in_progress'])
+  // A new list replaces the old steps; the person's own tasks stay.
+  const mine = { id: 'user-1', subject: 'Push', status: 'pending' as const, owner: 'user' as const }
+  expect(applyPlan([...plan, mine], { items: [{ content: 'Only step', status: 'pending' }] }).map(task => task.subject)).toEqual(['Push', 'Only step'])
+})
+
+test('update_plan calls in a desktop session fill the Agent tasks card', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('tool.call', async () => ({ result: { text: 'Plan shown (2 steps).' } as never }))
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', items: [{ content: 'Read the code', status: 'in_progress' }, { content: 'Fix it', status: 'pending' }] } as never)
+  await $.tool.call({ tool: 'mcp__ccd_turn__update_plan', advance: true } as never)
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'Fix it' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '1/2' })).toBeDefined()
   await pane.unmount()
 })

@@ -3,7 +3,7 @@
 A pane beside the Claude Code chat that shows where a session stands, without asking the agent and spending a turn on it:
 
 - **Status:** a rolling summary after every answer: goal, done-when criteria, what was just done, what is next, and a quiet line when a turn drifted off the goal.
-- **Agent tasks:** a checklist that fills itself from the agent's own task tools (`TaskCreate`, `TaskUpdate`, `TodoWrite`), with subtasks, progress and an Edit mode.
+- **Agent tasks:** a checklist that fills itself from the agent's own task tools (`TaskCreate`, `TaskUpdate` and `TodoWrite` in the terminal; the desktop app's own task list, `update_plan`, in its Code tab), with subtasks, progress and an Edit mode.
 - **Your to-dos:** what you have to do yourself (push, review, decide, test by hand), with the next step suggested from the conversation.
 
 ## Install

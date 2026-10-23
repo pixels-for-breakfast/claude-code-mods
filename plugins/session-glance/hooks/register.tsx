@@ -9,7 +9,8 @@ import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './pro
 import { MODELS, SWITCHES, isSwitchOn, modelOf } from './settings'
 import type { Criterion } from './status'
 import { appendHistory, compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom, yourMoveFrom } from './status'
-import { activeOf, describeChanges, mergeDraft, moveTask, openTodos, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
+import { activeOf, applyPlan, describeChanges, mergeDraft, moveTask, openTodos, ownedBy, ownerOf, planDrop, progress, replaceList, setArchived, shownStatus } from './tree'
+import type { PlanCall } from './tree'
 
 const PANE = 'session-glance'
 const summary = atom({ plugin: 'session-glance', key: 'summary' } as const, '')
@@ -62,6 +63,9 @@ const yourMove = atom({ plugin: 'session-glance', key: 'yourMove' } as const, ''
 /** What each earlier turn did, oldest first: the Status card's history. */
 const history = atom({ plugin: 'session-glance', key: 'history' } as const, [] as HistoryEntry[])
 const isHistoryOpen = atom({ plugin: 'session-glance', key: 'isHistoryOpen' } as const, false)
+/** The desktop app's task-list tool: in its sessions the agent plans with it instead of TaskCreate or TodoWrite. */
+const PLAN_TOOL = 'mcp__ccd_turn__update_plan'
+
 /** How often the session id and the selection are checked: neither change raises an event. */
 const POLL_MS = 400
 
@@ -597,21 +601,6 @@ function hasRun(ran: ToolCallResult): boolean {
   return !('deny' in ran && ran.deny !== undefined) && ran.isError !== true
 }
 
-/** The task list after a TodoWrite. Its ids follow the list's order, so an archived one is recognised by its subject. */
-function todoList(list: readonly Task[], todos: readonly { content: string; status: Task['status'] }[]): Task[] {
-  const archivedSubjects = list.filter(task => task.id.startsWith('todo-') && task.archived === true).map(task => task.subject)
-
-  return [
-    ...list.filter(task => !task.id.startsWith('todo-')),
-    ...todos.map((todo, i) => ({
-      id: `todo-${i}`,
-      subject: todo.content,
-      status: todo.status,
-      ...(archivedSubjects.includes(todo.content) ? { archived: true } : {}),
-    })),
-  ]
-}
-
 /** Writes one of the mod's settings; the engine then reloads the module with the new options. */
 async function setOption($: EngineInterface, key: string, value: boolean | string): Promise<void> {
   const { deny } = await $.config.set({ key: `session-glance.${key}`, value })
@@ -761,6 +750,12 @@ export const register: Register = (on, options) => {
     if (!hasRun(ran) || !('tool' in e)) {
       return ran
     }
+    // The desktop app's own task list stands in for the task tools there; its input is read as data.
+    if ((e.tool as string) === PLAN_TOOL) {
+      await update($, tasks, list => applyPlan(list, e as unknown as PlanCall)).catch(() => undefined)
+
+      return ran
+    }
     // Bookkeeping only: a failure here must never fail the tool call it watched.
     try {
       if (e.tool === 'TaskCreate') {
@@ -775,7 +770,7 @@ export const register: Register = (on, options) => {
         )
       } else if (e.tool === 'TodoWrite') {
         // TodoWrite sends the whole list; the person's own tasks stay.
-        await update($, tasks, list => todoList(list, e.todos))
+        await update($, tasks, list => replaceList(list, 'todo-', e.todos))
       }
     } catch {
       // The pane just misses this task change.
