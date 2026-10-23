@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.0
+
+- A wide pane lays its cards out side by side. Docked at the top or bottom of the desktop app the pane is about 158 cells wide and 23 high, so stacked cards left most of it empty; from 110 cells wide the shown cards are equal columns, with Settings full width below.
+
 ## 1.1.0
 
 - **Mode** in the Settings card: **Smart** (as before) or **Manual**, which makes no model calls and keeps only what you track by hand. In Manual the Smart settings hide and keep their values. Also `/glance mode smart|manual`.

@@ -26,7 +26,7 @@ In the desktop app, where `/plugin` does not run: click + next to the prompt box
 
 ## Using it
 
-The pane opens at the start of a session. Toggle it with `/glance`, or with the **Show status / Hide status** button above the prompt (`g` in the terminal).
+The pane opens at the start of a session. Toggle it with `/glance`, or with the **Show status / Hide status** button above the prompt (`g` in the terminal). Wherever you dock it, it fits: beside the chat the cards are stacked; docked at the top or bottom (from 110 cells wide) they sit side by side.
 
 ![The same pane in a terminal session, with the band above the prompt](../../docs/session-glance/pane-terminal.png)
 

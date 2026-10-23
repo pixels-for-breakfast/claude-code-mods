@@ -949,6 +949,7 @@ export const register: Register = (on, options) => {
       isSmart,
       cards: isShown,
       version,
+      columns: e.props.bodyColumns,
     }
     const toggle = (id: string) => (ids: string[]) => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id])
 

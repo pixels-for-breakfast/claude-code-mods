@@ -20,6 +20,12 @@ const EDIT_HELP =
   'Click a task to rename it, add subtasks or move it to the other card. The box archives a task, the bin removes it. ' +
   'Nothing changes until Save.'
 
+/**
+ * From this width the cards sit side by side: three of about 35 cells. Measured in the desktop app,
+ * the pane docked at the side is 71 cells wide and 50 high, at the top or bottom 158 by 23.
+ */
+export const WIDE_COLUMNS = 110
+
 /** Type and spacing: two steps up the API's five sizes (caption, footnote, body, heading, title), for reading at a glance. */
 const TYPE = { text: 'heading', label: 'body', head: 'title', icon: 24, padX: 'xl', padY: 'lg' } as const
 
@@ -71,6 +77,8 @@ export type PaneView = {
   cards: { status: boolean; agent: boolean; user: boolean }
   /** The mod's version, drawn dim at the bottom of Settings; empty draws nothing. */
   version: string
+  /** The pane's body width in cells: from WIDE_COLUMNS the cards sit side by side. */
+  columns: number
 }
 
 /** What a press in the pane runs; each one is a closure over the engine in `register.tsx`. */
@@ -243,6 +251,20 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
     </Box>
   )
 
+  const isWide = view.columns >= WIDE_COLUMNS
+  /**
+   * A card as it sits in the layout: wide, an equal share of the width, the card stretched across it and down to the
+   * tallest card (a desktop gives a card only its content's size otherwise); stacked, the full width.
+   */
+  const column = (card: RenderElement) =>
+    isWide ? (
+      <Box flexDirection="column" alignItems="stretch" flexGrow={1} flexShrink={1} width={0} minWidth={0}>
+        {card}
+      </Box>
+    ) : (
+      card
+    )
+
   /** One On/Off row of the Settings card. */
   const switchRow = (row: SettingRow) => (
     <Box key={`setting-row-${row.key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
@@ -304,7 +326,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
     const isEditing = managing && editedCard === owner
 
     return (
-      <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
+      <Box flexDirection="column" gap="sm" flexGrow={isWide ? 1 : 0} borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
         {header(
           `toggle-tasks${suffix}`,
           isMine ? 'Your to-dos' : 'Agent tasks',
@@ -459,102 +481,105 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
 
   return (
     <Box flexDirection="column" gap="lg" padding={isTerminal ? 0 : 'md'}>
-      {cards.status && (
-        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
-          {header(
-            'toggle-summary',
-            'Status',
-            showSummary,
-            <Box gap="sm" alignItems="center">
-              {note(busy ? 'updating…' : '')}
-              {(hasSummary || stored.length > 0) && !managing && (
-                <Button
-                  key="copy-handoff"
-                  plain
-                  onPress={act.copy}
-                >
-                  <Text size={type.text} color="subtle">
-                    Copy
+      {/* Wide (docked at the top or bottom): the shown cards as equal columns; Settings stays full width below. */}
+      <Box key="cards" flexDirection={isWide ? 'row' : 'column'} alignItems="stretch" gap="lg">
+        {cards.status && column(
+          <Box flexDirection="column" gap="sm" flexGrow={isWide ? 1 : 0} borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
+            {header(
+              'toggle-summary',
+              'Status',
+              showSummary,
+              <Box gap="sm" alignItems="center">
+                {note(busy ? 'updating…' : '')}
+                {(hasSummary || stored.length > 0) && !managing && (
+                  <Button
+                    key="copy-handoff"
+                    plain
+                    onPress={act.copy}
+                  >
+                    <Text size={type.text} color="subtle">
+                      Copy
+                    </Text>
+                  </Button>
+                )}
+              </Box>,
+              act.toggleSummary,
+            )}
+            {suggestion !== '' && suggestionBox('Title suggestion', suggestion, 'use-title', 'Use as title', act.useTitle, 'dismiss-title', act.dismissTitle)}
+            {chosenTitle !== '' && note(`Renames the session to "${chosenTitle}" at your next prompt.`)}
+            {showSummary && !hasSummary && (
+              <Text size={type.text} color="inactive">
+                Appears after the first answer.
+              </Text>
+            )}
+            {showSummary &&
+              FIELDS.filter(field => fields[field.key]).map(field => (
+                <Box flexDirection="column" marginBottom={airy}>
+                  <Text size={type.label} color={field.color}>
+                    {field.label}
+                  </Text>
+                  {field.key === 'done_when' ? (
+                    <Box flexDirection="column">
+                      {criteria.map(criterion => (
+                        <Box key={`criterion-row-${criterion.text}`} alignItems="center" gap="sm" minWidth={0}>
+                          {Svg ? (
+                            <Svg source={criterion.isMet ? ICON.completed : ICON.pending} alt={criterion.isMet ? 'met' : 'open'} width={type.icon} height={type.icon} />
+                          ) : (
+                            <Text color="inactive">{criterion.isMet ? GLYPH.completed : GLYPH.pending}</Text>
+                          )}
+                          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                            <Button key={`criterion-${criterion.text}`} plain onPress={() => act.toggleCriterion(criterion)}>
+                              <Text size={type.text} color={criterion.isMet ? 'inactive' : undefined}>
+                                {criterion.text}
+                              </Text>
+                            </Button>
+                          </Box>
+                        </Box>
+                      ))}
+                      {isReached && (
+                        <Text size={type.text} color="success">
+                          Goal reached: wrap up, or set a new goal.
+                        </Text>
+                      )}
+                    </Box>
+                  ) : (
+                    <Text size={type.text}>{fields[field.key]}</Text>
+                  )}
+                </Box>
+              ))}
+            {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
+            {showSummary && history.length > 1 && (
+              // The newest entry is the Done line above, so the history starts one turn earlier.
+              <Box flexDirection="column" gap="xs" marginTop={airy}>
+                <Button key="toggle-history" plain onPress={act.toggleHistory}>
+                  <Text size={type.text} color="inactive">
+                    {`Earlier (${history.length - 1}) ${showHistory ? '▾' : '▸'}`}
                   </Text>
                 </Button>
-              )}
-            </Box>,
-            act.toggleSummary,
-          )}
-          {suggestion !== '' && suggestionBox('Title suggestion', suggestion, 'use-title', 'Use as title', act.useTitle, 'dismiss-title', act.dismissTitle)}
-          {chosenTitle !== '' && note(`Renames the session to "${chosenTitle}" at your next prompt.`)}
-          {showSummary && !hasSummary && (
-            <Text size={type.text} color="inactive">
-              Appears after the first answer.
-            </Text>
-          )}
-          {showSummary &&
-            FIELDS.filter(field => fields[field.key]).map(field => (
-              <Box flexDirection="column" marginBottom={airy}>
-                <Text size={type.label} color={field.color}>
-                  {field.label}
-                </Text>
-                {field.key === 'done_when' ? (
-                  <Box flexDirection="column">
-                    {criteria.map(criterion => (
-                      <Box key={`criterion-row-${criterion.text}`} alignItems="center" gap="sm" minWidth={0}>
-                        {Svg ? (
-                          <Svg source={criterion.isMet ? ICON.completed : ICON.pending} alt={criterion.isMet ? 'met' : 'open'} width={type.icon} height={type.icon} />
-                        ) : (
-                          <Text color="inactive">{criterion.isMet ? GLYPH.completed : GLYPH.pending}</Text>
-                        )}
-                        <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                          <Button key={`criterion-${criterion.text}`} plain onPress={() => act.toggleCriterion(criterion)}>
-                            <Text size={type.text} color={criterion.isMet ? 'inactive' : undefined}>
-                              {criterion.text}
-                            </Text>
-                          </Button>
+                {showHistory &&
+                  history
+                    .slice(0, -1)
+                    .reverse()
+                    .map(entry => (
+                      <Box key={`history-${entry.turn}-${entry.done}`} gap="sm" minWidth={0}>
+                        <Text size={type.label} color="inactive">
+                          {`#${entry.turn}`}
+                        </Text>
+                        <Box flexShrink={1} minWidth={0}>
+                          <Text size={type.text} color="inactive">
+                            {entry.done}
+                          </Text>
                         </Box>
                       </Box>
                     ))}
-                    {isReached && (
-                      <Text size={type.text} color="success">
-                        Goal reached: wrap up, or set a new goal.
-                      </Text>
-                    )}
-                  </Box>
-                ) : (
-                  <Text size={type.text}>{fields[field.key]}</Text>
-                )}
               </Box>
-            ))}
-          {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
-          {showSummary && history.length > 1 && (
-            // The newest entry is the Done line above, so the history starts one turn earlier.
-            <Box flexDirection="column" gap="xs" marginTop={airy}>
-              <Button key="toggle-history" plain onPress={act.toggleHistory}>
-                <Text size={type.text} color="inactive">
-                  {`Earlier (${history.length - 1}) ${showHistory ? '▾' : '▸'}`}
-                </Text>
-              </Button>
-              {showHistory &&
-                history
-                  .slice(0, -1)
-                  .reverse()
-                  .map(entry => (
-                    <Box key={`history-${entry.turn}-${entry.done}`} gap="sm" minWidth={0}>
-                      <Text size={type.label} color="inactive">
-                        {`#${entry.turn}`}
-                      </Text>
-                      <Box flexShrink={1} minWidth={0}>
-                        <Text size={type.text} color="inactive">
-                          {entry.done}
-                        </Text>
-                      </Box>
-                    </Box>
-                  ))}
-            </Box>
-          )}
-        </Box>
-      )}
+            )}
+          </Box>
+        )}
 
-      {cards.agent && taskCard('agent')}
-      {cards.user && taskCard('user')}
+        {cards.agent && column(taskCard('agent'))}
+        {cards.user && column(taskCard('user'))}
+      </Box>
       <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
         {/* What the mod itself spent sits in the Settings header: visible, without a line of its own under the cards. */}
         {header('toggle-settings', 'Settings', showSettings, cost.calls > 0 ? note(spentLine(cost)) : null, act.toggleSettings)}

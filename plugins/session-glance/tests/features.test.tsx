@@ -695,3 +695,16 @@ test('the Settings card ends with the mod\'s version, read from its manifest', a
   expect(await pane.find({ type: 'Text', text: 'session-glance 9.8.7' })).toBeDefined()
   await pane.unmount()
 })
+
+test('a wide pane (docked at the top or bottom) lays the cards out as columns', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.command.run({ command: 'glance', args: 'demo' } as never)
+  for (const [bodyColumns, direction] of [[158, 'row'], [71, 'column']] as const) {
+    const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: { ...PANE, bodyColumns } as never })
+    expect((await pane.find({ type: 'Box', key: 'cards' }))?.props.flexDirection).toBe(direction)
+    expect(await pane.find({ type: 'Text', text: 'Write the README' })).toBeDefined()
+    await pane.unmount()
+  }
+})
