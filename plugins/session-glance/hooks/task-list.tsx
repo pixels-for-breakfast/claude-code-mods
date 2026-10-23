@@ -89,7 +89,8 @@ const EditOverlay: ClientModule<OverlayProps, DragState> = (props, surface) => {
     <Box flexDirection="column" width="100%" height={height} position="relative">
       {plan && lineRow >= 0 && (
         <Box position="absolute" top={lineCell} left={HANDLE_CELLS + (plan.depth === 1 ? 3 : 0)} right={0} height={1} overflow="hidden">
-          <Text color="claude" wrap="truncate-end">
+          {/* Cut at the edge without an ellipsis: a line ending in "…" reads as text. */}
+          <Text color="claude" wrap="truncate">
             {stroke.repeat(400)}
           </Text>
         </Box>

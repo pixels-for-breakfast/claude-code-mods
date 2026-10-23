@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.9
+
+- The drop line in Edit mode ends at the edge of the drag layer without an ellipsis; it ended in a stray "…".
+
 ## 1.0.8
 
 - The carry-over offer leaves out to-dos your card already holds, the same one or one worded the same. It offered "Write the README" next to the demo's own copy, and bringing it added nothing.
