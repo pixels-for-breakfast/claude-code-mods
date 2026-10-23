@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.6
+
+- Edit mode on the desktop draws its rows closer together: two cells a row instead of three, near the pitch of the rows outside Edit mode.
+
 ## 1.0.5
 
 - Suggestions stand out: a box framed in the accent, a ✦ label, the suggestion in medium weight, the main button drawn as the surface's primary button and Dismiss quieter beside it.

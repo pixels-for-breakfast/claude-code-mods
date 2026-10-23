@@ -122,12 +122,12 @@ test('Edit mode changes nothing until Save, and Cancel drops the draft', async (
   const order = async () => (await ui.findAll({ type: 'Text' })).map(found => found.text).filter(text => text.trim() !== '')
 
   // Display rows: 0 toggle (partial), 1 wire, 2 draw, 3 polish, 4 seed, 5 try, 6 readme (folded), 7 sketch,
-  // 8 write, 9 ship, 10-11 its subtasks. Rows are 3 cells high (the pointer reads a cell's middle):
-  // cell 15 is in row 5 ("Try it…"), and cell 11 is nearest the gap above row 4 ("Seed…").
+  // 8 write, 9 ship, 10-11 its subtasks. Rows are 2 cells high (the pointer reads a cell's middle):
+  // cell 10 is in row 5 ("Try it…"), and cell 7 is nearest the gap above row 4 ("Seed…").
   const drag = async () => {
-    await ui.pointer({ type: 'down', x: 0, y: 15, button: 'left', in: 'edit-overlay' })
-    await ui.pointer({ type: 'move', x: 0, y: 11, button: 'left', in: 'edit-overlay' })
-    await ui.pointer({ type: 'up', x: 0, y: 11, button: 'left', in: 'edit-overlay' })
+    await ui.pointer({ type: 'down', x: 0, y: 10, button: 'left', in: 'edit-overlay' })
+    await ui.pointer({ type: 'move', x: 0, y: 7, button: 'left', in: 'edit-overlay' })
+    await ui.pointer({ type: 'up', x: 0, y: 7, button: 'left', in: 'edit-overlay' })
   }
 
   await ui.press({ key: 'toggle-manage' })
@@ -143,9 +143,9 @@ test('Edit mode changes nothing until Save, and Cancel drops the draft', async (
   await ui.resize({ columns: 40, rows: 36, in: 'edit-overlay' } as never)
   await drag()
   await ui.press({ key: 'remove-demo-1' })
-  // A click on a row's text, through the layer, selects it: after the drag and removal "Seed…" is row 5 (cells 15-18).
-  await ui.pointer({ type: 'down', x: 10, y: 15, button: 'left', in: 'edit-overlay' })
-  await ui.pointer({ type: 'up', x: 10, y: 15, button: 'left', in: 'edit-overlay' })
+  // A click on a row's text, through the layer, selects it: after the drag and removal "Seed…" is row 5 (cells 10-11).
+  await ui.pointer({ type: 'down', x: 10, y: 10, button: 'left', in: 'edit-overlay' })
+  await ui.pointer({ type: 'up', x: 10, y: 10, button: 'left', in: 'edit-overlay' })
   await ui.input({ key: 'subtask-demo-4-0', text: 'Pick five tasks' })
   await ui.press({ key: 'save-edit' })
   rows = await order()
@@ -154,15 +154,15 @@ test('Edit mode changes nothing until Save, and Cancel drops the draft', async (
   // The subtask follows its main task, after the main task's 0/1 subtask count.
   expect(rows.slice(rows.indexOf('Seed fake tasks for a demo') + 1, rows.indexOf('Seed fake tasks for a demo') + 3)).toEqual(['0/1', 'Pick five tasks'])
 
-  // Rows now: 0 toggle, 1 wire, 2 draw, 3 polish, 4 try, 5 seed, 6 pick, 7 readme, … Drag "Try…" (row 4, cell 12)
-  // three cells right onto the gap above "Pick…" (slot 6, cell 17): it becomes a subtask of "Seed…".
+  // Rows now: 0 toggle, 1 wire, 2 draw, 3 polish, 4 try, 5 seed, 6 pick, 7 readme, … Drag "Try…" (row 4, cell 8)
+  // three cells right onto the gap above "Pick…" (slot 6, cell 11): it becomes a subtask of "Seed…".
   await ui.press({ key: 'toggle-manage' })
   await ui.resize({ columns: 40, rows: 36, in: 'edit-overlay' } as never)
-  await ui.pointer({ type: 'down', x: 0, y: 12, button: 'left', in: 'edit-overlay' })
-  await ui.pointer({ type: 'move', x: 3, y: 17, button: 'left', in: 'edit-overlay' })
+  await ui.pointer({ type: 'down', x: 0, y: 8, button: 'left', in: 'edit-overlay' })
+  await ui.pointer({ type: 'move', x: 3, y: 11, button: 'left', in: 'edit-overlay' })
   // The landing line is drawn by the layer itself while the pointer is still down.
   expect(await ui.find({ type: 'Text', text: /^[▔─▁]+$/, in: 'edit-overlay' })).toBeDefined()
-  await ui.pointer({ type: 'up', x: 3, y: 17, button: 'left', in: 'edit-overlay' })
+  await ui.pointer({ type: 'up', x: 3, y: 11, button: 'left', in: 'edit-overlay' })
   await ui.press({ key: 'save-edit' })
   rows = await order()
   expect(rows[rows.indexOf('Seed fake tasks for a demo') + 1]).toBe('0/2')

@@ -112,8 +112,8 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
   const hasSummary = Object.keys(fields).length > 0
   const type = TYPE
   // The terminal lays out whole cells only: two per Edit row, a blank one above the text that the drop line can use.
-  // Elsewhere the heading-size rows take three.
-  const rowHeight = isTerminal ? 2 : 3
+  // Elsewhere two fit the heading-size text and icons, close to the pitch of the rows outside Edit mode.
+  const rowHeight = 2
 
   // The terminal draws the small spacing steps as no rows at all, so it gets whole blank rows where the desktop's gaps fall.
   const airy = isTerminal ? 1 : 0
