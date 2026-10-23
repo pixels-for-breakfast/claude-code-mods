@@ -1,4 +1,4 @@
-import type { Owner, Task } from '../types'
+import type { HistoryEntry, Owner, Task } from '../types'
 import { activeOf, displayRows, ownedBy } from './tree'
 
 /** The status card's text: what the model wrote, read into fields, criteria and the markdown handoff. */
@@ -115,4 +115,17 @@ export function yourMoveFrom(answer: string, yourMove: string | undefined): stri
   const lastLine = answer.trim().split('\n').filter(line => line.trim() !== '').pop() ?? ''
 
   return /\?\s*\**\s*$/.test(lastLine) ? 'answer the question' : ''
+}
+
+/** How many earlier turns the history keeps. */
+export const HISTORY_SIZE = 50
+
+/** Adds a turn's DONE line to the history, unless it says what the last entry already said. */
+export function appendHistory(history: readonly HistoryEntry[], done: string | undefined, turn: number): HistoryEntry[] {
+  const text = (done ?? '').trim()
+  if (text === '' || history.at(-1)?.done.toLowerCase() === text.toLowerCase()) {
+    return [...history]
+  }
+
+  return [...history, { turn, done: text }].slice(-HISTORY_SIZE)
 }

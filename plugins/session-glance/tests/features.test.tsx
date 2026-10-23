@@ -2,7 +2,7 @@ import { expect, mock, test } from 'claude-code/testing'
 
 import { infoIcon } from '../hooks/icons'
 import { summaryPrompt } from '../hooks/prompts'
-import { compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, yourMoveFrom } from '../hooks/status'
+import { HISTORY_SIZE, appendHistory, compactNote, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, yourMoveFrom } from '../hooks/status'
 import { activeOf, describeChanges, moveTask, openTodos, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
@@ -548,4 +548,41 @@ test('the band says it is your move between turns, and drops it at your next pro
   const after = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'AbovePrompt', props: BAND as never })
   expect(await after.find({ type: 'Text', text: /your move/ })).toBeUndefined()
   await after.unmount()
+})
+
+test('appendHistory keeps one entry per change, newest last, at most HISTORY_SIZE', () => {
+  const one = appendHistory([], 'Wrote tests', 1)
+  expect(appendHistory(one, 'wrote tests', 2)).toEqual(one)
+  expect(appendHistory(one, '', 2)).toEqual(one)
+  expect(appendHistory(one, 'Pushed', 2)).toEqual([{ turn: 1, done: 'Wrote tests' }, { turn: 2, done: 'Pushed' }])
+  const full = Array.from({ length: HISTORY_SIZE }, (_, i) => ({ turn: i, done: `d${i}` }))
+  expect(appendHistory(full, 'new', 99).length).toBe(HISTORY_SIZE)
+})
+
+test('the Status card keeps what earlier turns did under Earlier', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('session.turns', async () => ({ value: turns }))
+  on('turn.complete', async () => ({ text: '' }))
+  let turns = 0
+  let done = ''
+  on('model.complete', async () => ({
+    value: {
+      isAnswered: true as const,
+      text: `TITLE: Ship\nGOAL: Ship it\nDONE_WHEN: [ ] Pushed\nDONE: ${done}\nNEXT: Push\nDRIFT: none\nYOUR_MOVE: none`,
+      usage: { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 },
+    },
+  }))
+  for (const [i, text] of ['Wrote the tests', 'Fixed the parser', 'Committed'].entries()) {
+    turns = i + 1
+    done = text
+    await $.turn.complete(turn(text, `t${i}`))
+  }
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'Earlier (2) ▸' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Wrote the tests' })).toBeUndefined()
+  await pane.press({ key: 'toggle-history' })
+  expect(await pane.find({ type: 'Text', text: 'Wrote the tests' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '#2' })).toBeDefined()
+  await pane.unmount()
 })

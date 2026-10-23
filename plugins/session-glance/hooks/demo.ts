@@ -1,4 +1,4 @@
-import type { Task } from '../types'
+import type { HistoryEntry, Task } from '../types'
 
 /** What `/glance demo` fills the pane with. */
 
@@ -32,3 +32,9 @@ export const DEMO_SUMMARY = [
   'NEXT: Click a task, then try Edit mode and drag one',
 ].join('\n')
 export const DEMO_FOLDED = ['demo-8']
+
+export const DEMO_HISTORY: HistoryEntry[] = [
+  { turn: 1, done: 'Sketched the pane layout' },
+  { turn: 2, done: 'Wrote the summary prompt' },
+  { turn: 3, done: 'Drew the toggle button above the prompt' },
+]

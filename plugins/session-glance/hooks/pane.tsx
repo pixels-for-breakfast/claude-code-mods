@@ -1,6 +1,6 @@
 import type { ElementTable, RenderChildren, RenderElement } from 'claude-code'
 
-import type { Owner, Spent, Task } from '../types'
+import type { HistoryEntry, Owner, Spent, Task } from '../types'
 import { ARCHIVE, CHEVRON, FOLD, GLYPH, ICON, TRASH, infoIcon } from './icons'
 import { MODELS } from './settings'
 import type { Criterion } from './status'
@@ -56,6 +56,9 @@ export type PaneView = {
   archiveOwners: Owner[]
   /** Open to-dos from the last session in this project, offered in the You card. */
   carried: Task[]
+  /** What each earlier turn did, oldest first. */
+  history: HistoryEntry[]
+  showHistory: boolean
   settingRows: SettingRow[]
 }
 
@@ -67,6 +70,7 @@ export type PaneActions = {
   toggleFold: (id: string) => unknown
   toggleArchive: (owner: Owner) => unknown
   toggleHelp: () => unknown
+  toggleHistory: () => unknown
   select: (id: string) => unknown
   changeStatus: (task: Task) => unknown
   startEditing: (owner: Owner) => unknown
@@ -98,7 +102,7 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
   const {
     isTerminal, fields, criteria, isReached, drift, cost, suggestion, chosenTitle, busy, checking, stored, managing, editedCard,
     helpOpen, adds, mineAdds, selected, subtaskAdds, foldedIds, showSummary, showTasks, showMine, showSettings, nextMove,
-    archiveOwners, carried, settingRows,
+    archiveOwners, carried, history, showHistory, settingRows,
   } = view
   const hasSummary = Object.keys(fields).length > 0
   const type = TYPE
@@ -467,6 +471,32 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
             </Box>
           ))}
         {showSummary && drift !== '' && <Text size={type.text} color="inactive">{`Off goal: ${drift}`}</Text>}
+        {showSummary && history.length > 1 && (
+          // The newest entry is the Done line above, so the history starts one turn earlier.
+          <Box flexDirection="column" gap="xs" marginTop={airy}>
+            <Button key="toggle-history" plain onPress={act.toggleHistory}>
+              <Text size={type.text} color="inactive">
+                {`Earlier (${history.length - 1}) ${showHistory ? '▾' : '▸'}`}
+              </Text>
+            </Button>
+            {showHistory &&
+              history
+                .slice(0, -1)
+                .reverse()
+                .map(entry => (
+                  <Box key={`history-${entry.turn}-${entry.done}`} gap="sm" minWidth={0}>
+                    <Text size={type.label} color="inactive">
+                      {`#${entry.turn}`}
+                    </Text>
+                    <Box flexShrink={1} minWidth={0}>
+                      <Text size={type.text} color="inactive">
+                        {entry.done}
+                      </Text>
+                    </Box>
+                  </Box>
+                ))}
+          </Box>
+        )}
       </Box>
 
       {taskCard('agent')}

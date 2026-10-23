@@ -3,6 +3,8 @@ export type TaskStatus = 'pending' | 'in_progress' | 'completed'
 export type Owner = 'agent' | 'user'
 /** A task; `parentId` makes it a subtask of that main task (one level deep). No `owner` means the agent's; `archived` puts it away. */
 export type Task = { id: string; subject: string; status: TaskStatus; parentId?: string; owner?: Owner; archived?: boolean }
+/** One turn's DONE line, kept for the Status card's history; `turn` counts the person's prompts. */
+export type HistoryEntry = { turn: number; done: string }
 /** What the mod's own model calls cost this session, summed from each call's usage. */
 export type Spent = { calls: number; input: number; output: number }
 
@@ -44,6 +46,8 @@ declare module 'claude-code' {
       isHelpOpen: boolean
       carryOffer: Task[]
       yourMove: string
+      history: HistoryEntry[]
+      isHistoryOpen: boolean
     }
   }
 }

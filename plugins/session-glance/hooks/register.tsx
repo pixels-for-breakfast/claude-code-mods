@@ -1,14 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Register, RenderSurface, ToolCallResult } from 'claude-code'
 
-import type { Owner, Spent, Task } from '../types'
-import { DEMO_FOLDED, DEMO_SUMMARY, DEMO_TASKS, DEMO_TITLE } from './demo'
+import type { HistoryEntry, Owner, Spent, Task } from '../types'
+import { DEMO_FOLDED, DEMO_HISTORY, DEMO_SUMMARY, DEMO_TASKS, DEMO_TITLE } from './demo'
 import { drawBand, drawPane } from './pane'
 import type { BandView, PaneView } from './pane'
 import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './prompts'
 import { MODELS, SWITCHES, isSwitchOn, modelOf } from './settings'
 import type { Criterion } from './status'
-import { compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom, yourMoveFrom } from './status'
+import { appendHistory, compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom, yourMoveFrom } from './status'
 import { activeOf, describeChanges, mergeDraft, moveTask, openTodos, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
 
 const PANE = 'session-glance'
@@ -59,6 +59,9 @@ const isSettingsOpen = atom({ plugin: 'session-glance', key: 'isSettingsOpen' } 
 const carryOffer = atom({ plugin: 'session-glance', key: 'carryOffer' } as const, [] as Task[])
 /** What the person is waiting to do after the last turn, shown in the band until their next prompt. */
 const yourMove = atom({ plugin: 'session-glance', key: 'yourMove' } as const, '')
+/** What each earlier turn did, oldest first: the Status card's history. */
+const history = atom({ plugin: 'session-glance', key: 'history' } as const, [] as HistoryEntry[])
+const isHistoryOpen = atom({ plugin: 'session-glance', key: 'isHistoryOpen' } as const, false)
 /** How often the selection is checked for the band's buttons. */
 const SELECTION_POLL_MS = 400
 
@@ -99,6 +102,7 @@ export type Snapshot = {
   dismissedTitles: string[]
   moveSuggestion: string
   dismissedMoves: string[]
+  history: HistoryEntry[]
 }
 
 /** A pane with nothing in it: what /clear and /glance purge leave, and the base a saved pane is read over. */
@@ -115,6 +119,7 @@ const EMPTY_SNAPSHOT: Snapshot = {
   dismissedTitles: [],
   moveSuggestion: '',
   dismissedMoves: [],
+  history: [],
 }
 
 /** The session's project; empty where the host cannot say, which matches no other session. */
@@ -140,6 +145,7 @@ async function readSnapshot($: EngineInterface): Promise<Snapshot> {
     dismissedTitles: await read($, dismissedTitles),
     moveSuggestion: await read($, moveSuggestion),
     dismissedMoves: await read($, dismissedMoves),
+    history: await read($, history),
   }
 }
 
@@ -156,6 +162,7 @@ async function applySnapshot($: EngineInterface, snapshot: Snapshot): Promise<vo
   await update($, dismissedTitles, () => snapshot.dismissedTitles)
   await update($, moveSuggestion, () => snapshot.moveSuggestion)
   await update($, dismissedMoves, () => snapshot.dismissedMoves)
+  await update($, history, () => snapshot.history)
   await update($, pendingTitle, () => '')
   await update($, draft, () => [])
   await update($, selectedId, () => '')
@@ -488,6 +495,9 @@ async function summarize($: EngineInterface): Promise<boolean> {
     }
     const parts = splitReply(reply.text)
     await update($, summary, () => parts.summary)
+    const turn = await $.session.turns().catch(() => 0)
+    // Where the host cannot count prompts, the entry takes the next number in the history.
+    await update($, history, list => appendHistory(list, parseSummary(parts.summary).done, turn > 0 ? turn : list.length + 1))
     if (parts.title !== '') {
       await update($, title, () => parts.title)
     }
@@ -682,6 +692,7 @@ export const register: Register = (on, options) => {
         ticked: [],
         titleAnchor: DEMO_TITLE,
         moveSuggestion: 'Push the branch',
+        history: DEMO_HISTORY,
       })
       await save($)
       await openPane($)
@@ -890,6 +901,8 @@ export const register: Register = (on, options) => {
       nextMove: await read($, moveSuggestion),
       archiveOwners: await read($, openArchives),
       carried: await read($, carryOffer),
+      history: await read($, history),
+      showHistory: await read($, isHistoryOpen),
       settingRows: SWITCHES.map(row => ({ key: row.key, label: row.label, hint: row.hint, isOn: isSwitchOn(options, row.key) })),
     }
     const toggle = (id: string) => (ids: string[]) => (ids.includes(id) ? ids.filter(one => one !== id) : [...ids, id])
@@ -901,6 +914,7 @@ export const register: Register = (on, options) => {
       toggleFold: id => update($, folded, toggle(id)),
       toggleArchive: owner => update($, openArchives, owners => (owners.includes(owner) ? owners.filter(one => one !== owner) : [...owners, owner])),
       toggleHelp: () => update($, isHelpOpen, open => !open),
+      toggleHistory: () => update($, isHistoryOpen, open => !open),
       select: id => update($, selectedId, current => (current === id ? '' : id)),
       changeStatus: task => changeStatus($, task),
       startEditing: owner => startEditing($, owner),

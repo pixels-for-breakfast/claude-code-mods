@@ -44,6 +44,7 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 
 - **Done when** is a list of 1–4 criteria. The model marks them met as the work goes on; click one to tick or untick it yourself. A criterion you ticked stays met. When all are met, the card says the goal is reached.
 - **Off goal** appears when the last turn did something other than the goal. It never interrupts the agent.
+- **Earlier (n)** keeps what each earlier turn did (its Done line, numbered by prompt), newest first, so after a `/resume` you can see how the session got here. It holds the last 50 and is saved with the pane.
 - **Copy** puts the same markdown as `/glance copy` on the clipboard.
 - **Title suggestion** appears when the session's work as a whole has moved away from its title. **Use** sets it as the session title at your next prompt; **Dismiss** keeps it from being offered again.
 - The footer shows what the mod itself has spent this session: model calls, tokens and the model in use.

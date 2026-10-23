@@ -1,6 +1,6 @@
 {
   "name": "session-glance",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "A pane with a rolling status of the session, the agent's tasks and your own to-dos",
   "author": {
     "name": "Pixels for Breakfast",
