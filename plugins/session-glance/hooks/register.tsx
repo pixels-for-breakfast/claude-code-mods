@@ -1394,7 +1394,12 @@ export const register: Register = (on, options) => {
               <Box flexShrink={1} minWidth={0}>{note('Drag ⠿ right to nest a task under the one above')}</Box>
             </Box>
           )}
-          {isOpen && isEditing && helpOpen && !selected && rows.length > 0 && note(EDIT_HELP)}
+          {isOpen && isEditing && helpOpen && !selected && rows.length > 0 && (
+            // A blank row above on the terminal, lined up with the line's text after the ?.
+            <Box marginTop={isTerminal ? 1 : 'xs'} paddingLeft={isTerminal ? 2 : 0} minWidth={0}>
+              {note(EDIT_HELP)}
+            </Box>
+          )}
           {isOpen && (!isEditing || !Client) && rows.map((row, i) => taskRow(row, false, i === 0))}
           {isOpen && !isEditing && archivedTasks.length > 0 && (
             <Box flexDirection="column" gap="xs" marginTop={airy}>
