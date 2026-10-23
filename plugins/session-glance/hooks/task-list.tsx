@@ -3,9 +3,10 @@ import type { ClientModule } from 'claude-code'
 import type { Task } from '../types'
 import { INDENT_CELLS, displayRows, planDrop } from './tree'
 
-/** Cells the handle takes at a row's left, and the trash and fold caret at its right, as the pane lays them out. */
+/** Cells the handle takes at a row's left, and the trash, archive button and fold caret at its right, as the pane lays them out. */
 export const HANDLE_CELLS = 2
 const TRASH_CELLS = 2.5
+const ARCHIVE_CELLS = 2.5
 const FOLD_CELLS = 2.5
 
 /**
@@ -52,7 +53,9 @@ const EditOverlay: ClientModule<OverlayProps, DragState> = (props, surface) => {
     const fromRight = surface.columns - x
     if (fromRight <= TRASH_CELLS) {
       surface.post({ type: 'remove', id: row.task.id })
-    } else if (row.children > 0 && fromRight <= TRASH_CELLS + FOLD_CELLS) {
+    } else if (fromRight <= TRASH_CELLS + ARCHIVE_CELLS) {
+      surface.post({ type: 'archive', id: row.task.id })
+    } else if (row.children > 0 && fromRight <= TRASH_CELLS + ARCHIVE_CELLS + FOLD_CELLS) {
       surface.post({ type: 'fold', id: row.task.id })
     } else if (x > HANDLE_CELLS) {
       surface.post({ type: 'select', id: row.task.id })

@@ -3,7 +3,7 @@ import type { EngineInterface, ModelCompleteRequest, ModelCompleteResult, Regist
 
 import type { Owner, Spent, Task } from '../types'
 import { HANDLE_CELLS } from './task-list'
-import { displayRows, moveTask, ownedBy, ownerOf, planDrop, progress, shownStatus } from './tree'
+import { activeOf, displayRows, moveTask, ownedBy, ownerOf, planDrop, progress, setArchived, shownStatus } from './tree'
 import type { Row, ShownStatus } from './tree'
 
 const PANE = 'session-glance'
@@ -43,6 +43,9 @@ const moveSuggestion = atom({ plugin: 'session-glance', key: 'moveSuggestion' } 
 const dismissedMoves = atom({ plugin: 'session-glance', key: 'dismissedMoves' } as const, [] as string[])
 /** Whether text is selected on screen now, polled: the API raises no event when a selection changes. */
 const hasSelection = atom({ plugin: 'session-glance', key: 'hasSelection' } as const, false)
+/** The cards whose Archived fold is open. */
+const openArchives = atom({ plugin: 'session-glance', key: 'openArchives' } as const, [] as Owner[])
+const isSettingsOpen = atom({ plugin: 'session-glance', key: 'isSettingsOpen' } as const, false)
 /** How often the selection is checked for the band's buttons. */
 const SELECTION_POLL_MS = 400
 
@@ -182,6 +185,10 @@ const FOLD = {
 const TRASH =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 4.2h11M6.2 4.2V2.8h3.6v1.4M4 4.2l.7 9h6.6l.7-9M6.7 6.6v4.6M9.3 6.6v4.6"/></svg>'
 
+/** An archive box in the sidebar's grey, beside the bin in Edit mode. */
+const ARCHIVE =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="none" stroke="#8a8a8a" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="12" height="3" rx="0.8"/><path d="M3.2 6v6.5h9.6V6M6.5 8.8h3"/></svg>'
+
 const DEMO_TASKS: Task[] = [
   { id: 'demo-1', subject: 'Sketch the pane layout', status: 'completed' },
   { id: 'demo-2', subject: 'Write the summary prompt', status: 'completed' },
@@ -286,7 +293,7 @@ export function handoffMarkdown(sessionTitle: string, text: string, all: readonl
     fields.next ? `**Next:** ${fields.next}` : '',
   ].filter(part => part !== '')
   const section = (heading: string, owner: Owner): string[] => {
-    const lines = displayRows(ownedBy(all, owner)).map(row => `${row.depth === 1 ? '  ' : ''}- [${row.shown === 'completed' ? 'x' : ' '}] ${row.task.subject}`)
+    const lines = displayRows(activeOf(ownedBy(all, owner))).map(row => `${row.depth === 1 ? '  ' : ''}- [${row.shown === 'completed' ? 'x' : ' '}] ${row.task.subject}`)
 
     return lines.length > 0 ? [heading, lines.join('\n')] : []
   }
@@ -409,6 +416,10 @@ export function describeChanges(before: readonly Task[], after: readonly Task[])
       ? [ownerOf(task) === 'user' ? `moved "${task.subject}" to their own to-dos (theirs to do now, not yours)` : `handed "${task.subject}" to you`]
       : []
   })
+  const archived = after
+    .filter(task => task.archived === true && before.some(one => one.id === task.id && one.archived !== true))
+    .filter(task => !after.some(one => one.id === task.parentId && one.archived === true))
+    .map(task => `"${task.subject}"`)
   const kept = before.filter(task => after.some(one => one.id === task.id)).map(task => task.id)
   const isReordered = kept.join() !== after.filter(task => kept.includes(task.id)).map(task => task.id).join()
   const parts = [
@@ -416,6 +427,7 @@ export function describeChanges(before: readonly Task[], after: readonly Task[])
     removed.length > 0 ? `removed ${removed.join(', ')} (do not work on them unless asked)` : '',
     renamed.length > 0 ? `renamed ${renamed.join(', ')}` : '',
     ...moved,
+    archived.length > 0 ? `archived ${archived.join(', ')} (put away in the pane, not deleted)` : '',
     isReordered ? `reordered the checklist to: ${after.map(task => `"${task.subject}"`).join(', ')}` : '',
   ].filter(part => part !== '')
 
@@ -575,6 +587,19 @@ async function addSubtaskInDraft($: EngineInterface, parent: Task, typed: string
 async function removeFromDraft($: EngineInterface, task: Task): Promise<void> {
   await update($, draft, list => list.filter(one => one.id !== task.id && one.parentId !== task.id))
   await update($, selectedId, current => (current === task.id ? '' : current))
+}
+
+/** Puts a task (and its subtasks) away in the edit draft; saved or dropped with the draft. */
+async function archiveInDraft($: EngineInterface, task: Task): Promise<void> {
+  await update($, draft, list => setArchived(list, task.id, true))
+  await update($, selectedId, current => (current === task.id ? '' : current))
+}
+
+/** Brings an archived task (and its subtasks) back into its card. */
+async function restoreTask($: EngineInterface, task: Task): Promise<void> {
+  await update($, tasks, list => setArchived(list, task.id, false))
+  await tellModel($, `The user restored the archived task "${task.subject}" to the session pane.`)
+  await save($)
 }
 
 /** Hands a task (and its subtasks) to the other card in the edit draft. */
@@ -777,6 +802,14 @@ const SWITCHES = {
 } as const
 const MODELS = ['haiku', 'sonnet'] as const
 
+/** Writes one of the mod's settings; the engine then reloads the module with the new options. */
+async function setOption($: EngineInterface, key: string, value: boolean | string): Promise<void> {
+  const { deny } = await $.config.set({ key: `session-glance.${key}`, value })
+  if (deny !== undefined) {
+    $.ui.toast(`Could not change the setting: ${deny}`)
+  }
+}
+
 export const register: Register = (on, options) => {
   settings.model = MODELS.find(one => one === options.summaryModel) ?? 'haiku'
   settings.isAutoSummary = options.autoSummary !== false
@@ -925,10 +958,20 @@ export const register: Register = (on, options) => {
         )
       } else if (e.tool === 'TodoWrite' && !ran.isError) {
         // TodoWrite sends the whole list; the person's own tasks stay.
-        await update($, tasks, list => [
-          ...list.filter(task => !task.id.startsWith('todo-')),
-          ...e.todos.map((todo, i) => ({ id: `todo-${i}`, subject: todo.content, status: todo.status })),
-        ])
+        // Ids follow the list's order, so an archived one is recognised by its subject.
+        await update($, tasks, list => {
+          const archivedSubjects = list.filter(task => task.id.startsWith('todo-') && task.archived === true).map(task => task.subject)
+
+          return [
+            ...list.filter(task => !task.id.startsWith('todo-')),
+            ...e.todos.map((todo, i) => ({
+              id: `todo-${i}`,
+              subject: todo.content,
+              status: todo.status,
+              ...(archivedSubjects.includes(todo.content) ? { archived: true } : {}),
+            })),
+          ]
+        })
       }
     } catch {
       // The pane just misses this task change.
@@ -975,7 +1018,7 @@ export const register: Register = (on, options) => {
       return next(e)
     }
     const owner: Owner = e.element === 'edit-overlay-mine' ? 'user' : 'agent'
-    const data = e.data as { type: 'drop' | 'select' | 'remove' | 'fold'; id: string; slot?: number; dx?: number }
+    const data = e.data as { type: 'drop' | 'select' | 'remove' | 'archive' | 'fold'; id: string; slot?: number; dx?: number }
     const task = (await read($, draft)).find(one => one.id === data.id)
     if (task === undefined) {
       return {}
@@ -983,11 +1026,18 @@ export const register: Register = (on, options) => {
     if (data.type === 'drop') {
       const foldedIds = await read($, folded)
       // Each card has its own layer and rows, so the drop is planned within that card's tasks.
-      await update($, draft, list => [...planDrop(ownedBy(list, owner), data.id, data.slot ?? 0, data.dx ?? 0, foldedIds).list, ...list.filter(one => ownerOf(one) !== owner)])
+      // The layer only knows the card's visible rows; its archived tasks are kept after them.
+      await update($, draft, list => [
+        ...planDrop(activeOf(ownedBy(list, owner)), data.id, data.slot ?? 0, data.dx ?? 0, foldedIds).list,
+        ...ownedBy(list, owner).filter(one => one.archived === true),
+        ...list.filter(one => ownerOf(one) !== owner),
+      ])
     } else if (data.type === 'select') {
       await update($, selectedId, current => (current === data.id ? '' : data.id))
     } else if (data.type === 'remove') {
       await removeFromDraft($, task)
+    } else if (data.type === 'archive') {
+      await archiveInDraft($, task)
     } else {
       await update($, folded, ids => (ids.includes(data.id) ? ids.filter(one => one !== data.id) : [...ids, data.id]))
     }
@@ -1002,8 +1052,8 @@ export const register: Register = (on, options) => {
     const { Box, Button, Text } = $.ui.resolve(e)
     const isOpen = await read($, isPaneOpen)
     const list = await read($, tasks)
-    const { done, total } = progress(ownedBy(list, 'agent'))
-    const mineOpen = progress(ownedBy(list, 'user'))
+    const { done, total } = progress(activeOf(ownedBy(list, 'agent')))
+    const mineOpen = progress(activeOf(ownedBy(list, 'user')))
     const openForYou = mineOpen.total - mineOpen.done
     const current = await read($, title)
     const isSelected = await read($, hasSelection)
@@ -1072,6 +1122,14 @@ export const register: Register = (on, options) => {
     const showMine = await read($, isMineOpen)
     const mineAdds = await read($, mineAddCount)
     const nextMove = await read($, moveSuggestion)
+    const archiveOwners = await read($, openArchives)
+    const showSettings = await read($, isSettingsOpen)
+    const settingRows = [
+      { key: 'renameSession', label: 'Rename the session', hint: 'The status title becomes the session title', isOn: options.renameSession === true },
+      { key: 'suggestTitle', label: 'Suggest a new title', hint: 'When the work moves on; only while renaming is off', isOn: options.suggestTitle !== false },
+      { key: 'autoSummary', label: 'Update after every answer', hint: 'Off: only on /glance refresh', isOn: settings.isAutoSummary },
+      { key: 'checkTasks', label: 'Check tasks you type', hint: 'Tidy the wording, ask when unclear', isOn: settings.isTaskCheck },
+    ]
     const hasSummary = Object.keys(fields).length > 0
     const isTerminal = e.surface === 'terminal'
     const type = TYPE
@@ -1168,6 +1226,7 @@ export const register: Register = (on, options) => {
           </Box>
           {row.children > 0 && note(`${row.childrenDone}/${row.children}`)}
           {fold}
+          {isEditing && iconButton(`archive-${row.task.id}`, ARCHIVE, 'Archive', '▤', () => archiveInDraft($, row.task))}
           {isEditing && iconButton(`remove-${row.task.id}`, TRASH, 'Remove', '✕', () => removeFromDraft($, row.task))}
         </Box>
       )
@@ -1178,12 +1237,17 @@ export const register: Register = (on, options) => {
       const isMine = owner === 'user'
       // The agent's card keeps the keys it had before the split.
       const suffix = isMine ? '-mine' : ''
-      const list = ownedBy(stored, owner)
+      const list = activeOf(ownedBy(stored, owner))
+      // Shown once in the fold: a subtask archived with its main task goes with it.
+      const archivedTasks = ownedBy(stored, owner).filter(
+        task => task.archived === true && !stored.some(one => one.id === task.parentId && one.archived === true),
+      )
+      const isArchiveOpen = archiveOwners.includes(owner)
       const rows = displayRows(list, foldedIds)
       const { done, total } = progress(list)
       const isOpen = isMine ? showMine : showTasks
       // The Edit-mode hint is said once: in the agent's card, or in yours when the agent has none.
-      const hasHint = !isMine || ownedBy(stored, 'agent').length === 0
+      const hasHint = !isMine || activeOf(ownedBy(stored, 'agent')).length === 0
 
       return (
         <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
@@ -1290,9 +1354,39 @@ export const register: Register = (on, options) => {
                 </Box>
               ))}
           {isOpen && managing && hasHint && !selected && rows.length > 0 && (
-            <Box marginTop={airy}>{note('Drag ⠿ to reorder, sideways to nest or un-nest · click a task to rename, add subtasks or move it to the other card · nothing changes until Save')}</Box>
+            <Box marginTop={airy}>
+              {note('Drag ⠿ to reorder, sideways to nest or un-nest · click a task to rename, add subtasks or move it to the other card · archive or remove at the right · nothing changes until Save')}
+            </Box>
           )}
           {isOpen && (!managing || !Client) && rows.map((row, i) => taskRow(row, false, i === 0))}
+          {isOpen && !managing && archivedTasks.length > 0 && (
+            <Box flexDirection="column" gap="xs" marginTop={airy}>
+              <Button
+                key={`toggle-archived${suffix}`}
+                plain
+                onPress={() => update($, openArchives, owners => (owners.includes(owner) ? owners.filter(one => one !== owner) : [...owners, owner]))}
+              >
+                <Text size={type.text} color="inactive">
+                  {`Archived (${archivedTasks.length}) ${isArchiveOpen ? '▾' : '▸'}`}
+                </Text>
+              </Button>
+              {isArchiveOpen &&
+                archivedTasks.map(task => (
+                  <Box key={`archived-${task.id}`} alignItems="center" gap="sm" minWidth={0}>
+                    <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
+                      <Text size={type.text} color="inactive" wrap="truncate-end">
+                        {task.subject}
+                      </Text>
+                    </Box>
+                    <Button key={`restore-${task.id}`} plain onPress={() => restoreTask($, task)}>
+                      <Text size={type.text} color="subtle">
+                        Restore
+                      </Text>
+                    </Button>
+                  </Box>
+                ))}
+            </Box>
+          )}
           {isOpen && Input && (
             <Box marginTop={isTerminal ? 1 : 'sm'}>
               <Input
@@ -1399,6 +1493,44 @@ export const register: Register = (on, options) => {
 
         {taskCard('agent')}
         {taskCard('user')}
+        <Box flexDirection="column" gap="sm" borderStyle="round" borderColor="subtle" paddingX={type.padX} paddingY={type.padY}>
+          {header('toggle-settings', 'Settings', showSettings, null, () => update($, isSettingsOpen, open => !open))}
+          {showSettings &&
+            settingRows.map(row => (
+              <Box key={`setting-row-${row.key}`} justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
+                <Box flexDirection="column" flexShrink={1} minWidth={0}>
+                  <Text size={type.text}>{row.label}</Text>
+                  <Text size={type.label} color="inactive">
+                    {row.hint}
+                  </Text>
+                </Box>
+                <Button key={`setting-${row.key}`} plain onPress={() => setOption($, row.key, !row.isOn)}>
+                  <Text size={type.text} color={row.isOn ? 'claude' : 'subtle'} weight={row.isOn ? 'medium' : undefined}>
+                    {row.isOn ? 'On' : 'Off'}
+                  </Text>
+                </Button>
+              </Box>
+            ))}
+          {showSettings && (
+            <Box justifyContent="space-between" alignItems="center" gap="md" minWidth={0}>
+              <Box flexDirection="column" flexShrink={1} minWidth={0}>
+                <Text size={type.text}>Model</Text>
+                <Text size={type.label} color="inactive">
+                  For the status and the task check
+                </Text>
+              </Box>
+              <Box gap="md" alignItems="center">
+                {MODELS.map(model => (
+                  <Button key={`model-${model}`} plain onPress={() => setOption($, 'summaryModel', model)}>
+                    <Text size={type.text} color={settings.model === model ? 'claude' : 'subtle'} weight={settings.model === model ? 'medium' : undefined}>
+                      {model === 'haiku' ? 'Haiku' : 'Sonnet'}
+                    </Text>
+                  </Button>
+                ))}
+              </Box>
+            </Box>
+          )}
+        </Box>
         {cost.calls > 0 && (
           <Text size="footnote" color="inactive">
             {`glance: ${cost.calls} ${cost.calls === 1 ? 'call' : 'calls'} · ${formatTokens(cost.input + cost.output)} tokens (${formatTokens(cost.output)} out) · ${settings.model}`}

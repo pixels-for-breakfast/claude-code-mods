@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 
 import { compactNote, describeChanges, driftNote, formatCriteria, handoffMarkdown, parseCriteria, selectionTask, suggestionFrom, summaryPrompt } from '../hooks/register'
-import { moveTask } from '../hooks/tree'
+import { activeOf, moveTask, setArchived } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 
@@ -359,4 +359,74 @@ test('/glance task and todo add the selection, and say so when nothing is select
   expect((await $.command.run({ command: 'glance', args: 'todo' } as never)).text).toContain('to your to-dos')
   expect((await $.command.run({ command: 'glance', args: 'task' } as never)).text).toContain('as a task for the agent')
   expect(selectionTask(' a\n\n b ')).toBe('a b')
+})
+
+test('setArchived puts a main task away with its subtasks, and brings them back', () => {
+  const list = [
+    { id: 'a', subject: 'A', status: 'pending' as const },
+    { id: 'a1', subject: 'A1', status: 'pending' as const, parentId: 'a' },
+    { id: 'b', subject: 'B', status: 'completed' as const },
+  ]
+  const archived = setArchived(list, 'a', true)
+  expect(activeOf(archived).map(task => task.id)).toEqual(['b'])
+  expect(setArchived(archived, 'a', false)).toEqual(list)
+  expect(describeChanges(list, archived)).toBe('The user edited the session checklist: archived "A" (put away in the pane, not deleted).')
+  expect(handoffMarkdown('', '', archived, [])).not.toContain('- [ ] A')
+})
+
+test('archive in Edit mode moves a task to the Archived fold, and Restore brings it back', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.command.run({ command: 'glance', args: 'demo' } as never)
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  await pane.press({ key: 'toggle-manage' })
+  await pane.press({ key: 'archive-demo-1' })
+  await pane.press({ key: 'save-edit' })
+  expect(await pane.find({ type: 'Text', text: 'Sketch the pane layout' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '4/8' })).toBeDefined()
+  await pane.press({ key: 'toggle-archived' })
+  expect(await pane.find({ type: 'Text', text: 'Sketch the pane layout' })).toBeDefined()
+  await pane.press({ key: 'restore-demo-1' })
+  expect(await pane.find({ type: 'Text', text: /Archived/ })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: '5/9' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('an archived TodoWrite task stays archived when the agent rewrites its list', async ($, on) => {
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('tool.call', { tool: 'TodoWrite' }, async () => ({ result: {} as never }))
+  const todos = (status: 'pending' | 'completed') => [
+    { content: 'Old step', status: 'completed' as const, activeForm: 'x' },
+    { content: 'Next step', status, activeForm: 'y' },
+  ]
+  await $.tool.call({ tool: 'TodoWrite', todos: todos('pending') } as never)
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  await pane.press({ key: 'toggle-manage' })
+  await pane.press({ key: 'archive-todo-0' })
+  await pane.press({ key: 'save-edit' })
+  await $.tool.call({ tool: 'TodoWrite', todos: todos('completed') } as never)
+  expect(await pane.find({ type: 'Text', text: 'Old step' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Archived (1) ▸' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the Settings card switches settings and the model through the config', async ($, on) => {
+  const set: unknown[] = []
+  on('config.set', async (_$, e) => (set.push([e.key, e.value]), { value: e.value }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  const pane = await $.ui.mount({ plugin: 'session-glance', surface: 'terminal', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  expect(await pane.find({ type: 'Text', text: 'Check tasks you type' })).toBeUndefined()
+  await pane.press({ key: 'toggle-settings' })
+  await pane.press({ key: 'setting-autoSummary' })
+  await pane.press({ key: 'setting-renameSession' })
+  await pane.press({ key: 'model-sonnet' })
+  await pane.unmount()
+  expect(set).toEqual([
+    ['session-glance.autoSummary', false],
+    ['session-glance.renameSession', true],
+    ['session-glance.summaryModel', 'sonnet'],
+  ])
 })

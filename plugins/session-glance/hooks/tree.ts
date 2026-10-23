@@ -163,3 +163,20 @@ export function moveTask(all: readonly Task[], id: string): Task[] {
     return one.parentId === id ? { ...one, owner } : one
   })
 }
+
+/** Tasks that are not archived: what the cards, counts and handoff show. */
+export function activeOf(all: readonly Task[]): Task[] {
+  return all.filter(task => task.archived !== true)
+}
+
+/** Archives a task, or restores it; a main task takes its subtasks along either way. */
+export function setArchived(all: readonly Task[], id: string, isArchived: boolean): Task[] {
+  return all.map(task => {
+    if (task.id !== id && task.parentId !== id) {
+      return task
+    }
+    const { archived: _archived, ...rest } = task
+
+    return isArchived ? { ...rest, archived: true } : rest
+  })
+}

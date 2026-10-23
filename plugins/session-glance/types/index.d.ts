@@ -1,8 +1,8 @@
 export type TaskStatus = 'pending' | 'in_progress' | 'completed'
 /** Whose task it is: the agent's (from its task tools, or added for it) or the person's own to-do. */
 export type Owner = 'agent' | 'user'
-/** A task; `parentId` makes it a subtask of that main task (one level deep). No `owner` means the agent's. */
-export type Task = { id: string; subject: string; status: TaskStatus; parentId?: string; owner?: Owner }
+/** A task; `parentId` makes it a subtask of that main task (one level deep). No `owner` means the agent's; `archived` puts it away. */
+export type Task = { id: string; subject: string; status: TaskStatus; parentId?: string; owner?: Owner; archived?: boolean }
 /** What the mod's own model calls cost this session, summed from each call's usage. */
 export type Spent = { calls: number; input: number; output: number }
 
@@ -38,6 +38,8 @@ declare module 'claude-code' {
       moveSuggestion: string
       dismissedMoves: string[]
       hasSelection: boolean
+      openArchives: Owner[]
+      isSettingsOpen: boolean
     }
   }
 }
