@@ -1,0 +1,14 @@
+{
+  "description": "Tally the project's weekly token usage; warn at 80%, deny tool calls at 100%",
+  "hooks": {
+    "SessionStart": [
+      { "hooks": [{ "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/hooks/cc_budget.py\" hook", "timeout": 30 }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/hooks/cc_budget.py\" hook", "timeout": 10 }] }
+    ],
+    "PreToolUse": [
+      { "hooks": [{ "type": "command", "command": "python3 -I \"${CLAUDE_PLUGIN_ROOT}/hooks/cc_budget.py\" hook", "timeout": 10 }] }
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "cc-budget",
+  "version": "1.0.0",
+  "description": "Weekly token budgets per project and subagent type: warns at 80%, blocks tool calls at 100%",
+  "author": {
+    "name": "Pixels for Breakfast",
+    "url": "https://pixelsforbreakfast.nl"
+  },
+  "license": "MIT"
+}

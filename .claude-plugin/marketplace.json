@@ -7,6 +7,11 @@
       "name": "session-glance",
       "source": "./plugins/session-glance",
       "description": "A pane with a rolling status of the session, the agent's tasks and your own to-dos"
+    },
+    {
+      "name": "cc-budget",
+      "source": "./plugins/cc-budget",
+      "description": "Weekly token budgets per project and subagent type: warns at 80%, blocks tool calls at 100%"
     }
   ]
 }
