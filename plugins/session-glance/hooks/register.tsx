@@ -9,8 +9,8 @@ import { parseVerdict, splitReply, summaryPrompt, validationPrompt } from './pro
 import { MODELS, MODES, SWITCHES, isSwitchOn, modeOf, modelOf } from './settings'
 import type { Criterion } from './status'
 import { appendHistory, compactNote, driftNote, handoffMarkdown, parseCriteria, parseSummary, selectionTask, suggestionFrom, yourMoveFrom } from './status'
-import { activeOf, applyPlan, describeChanges, mergeDraft, moveTask, newTodos, openTodos, ownedBy, ownerOf, planDrop, progress, replaceList, setArchived, shownStatus } from './tree'
-import type { PlanCall } from './tree'
+import { activeOf, applyPlan, describeChanges, mergeDraft, moveTask, newTodos, openTodos, ownedBy, ownerOf, planDrop, progress, replaceList, setArchived, shownStatus, stepTask } from './tree'
+import type { PlanCall, Step } from './tree'
 
 const PANE = 'session-glance'
 const summary = atom({ plugin: 'session-glance', key: 'summary' } as const, '')
@@ -433,6 +433,17 @@ async function restoreTask($: EngineInterface, task: Task): Promise<void> {
   await update($, tasks, list => setArchived(list, task.id, false))
   await tellModel($, `The user restored the archived task "${task.subject}" to the session pane.`)
   await save($)
+}
+
+/** Moves a task one step in the edit draft, as a drag would; the card's archived tasks stay after its rows, as in a drop. */
+async function stepInDraft($: EngineInterface, task: Task, step: Step): Promise<void> {
+  const owner = await read($, editingOwner)
+  const foldedIds = await read($, folded)
+  await update($, draft, list => [
+    ...stepTask(activeOf(ownedBy(list, owner)), task.id, step, foldedIds),
+    ...ownedBy(list, owner).filter(one => one.archived === true),
+    ...list.filter(one => ownerOf(one) !== owner),
+  ])
 }
 
 /** Hands a task (and its subtasks) to the other card in the edit draft. */
@@ -968,6 +979,7 @@ export const register: Register = (on, options) => {
       rename: (task, value) => renameInDraft($, task, value),
       addSubtask: (task, value) => addSubtaskInDraft($, task, value),
       move: task => moveInDraft($, task),
+      step: (task, step) => stepInDraft($, task, step),
       archive: task => archiveInDraft($, task),
       remove: task => removeFromDraft($, task),
       restore: task => restoreTask($, task),

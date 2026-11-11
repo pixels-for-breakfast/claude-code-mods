@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.0
+
+- Edit mode moves a task with buttons as well as by dragging: click a task, then **↑ Up**, **↓ Down**, or **→ Nest**, which turns into **← Out** once nested. They do what the drag would, the task and the focus stay where they were for the next step, and Tab and Enter reach them, so Edit mode works without a mouse in the terminal.
+
 ## 1.2.1
 
 - In a wide pane the Settings card has two sections side by side: Mode with the Smart settings and the model, and Show with the card switches. Narrower, they stay one under the other.

@@ -63,7 +63,7 @@ While text is selected on screen, **+ Task** and **+ To-do** appear beside that 
 
 - Two cards: the agent's tasks, and the things you have to do yourself. Each has its own progress count; the band above the prompt shows the agent's count and how many to-dos are open for you.
 - Click a task to mark it done, start it or reopen it. A main task with subtasks shows how many are done, and its state follows them.
-- **Edit** opens Edit mode in that card (one card at a time): drag `⠿` to reorder, drag sideways to nest a task under the one above or take it out again, click a task to rename it, add subtasks or move it to the other card (a main task takes its subtasks along), archive it with the box or remove it with the bin at the end of its row. Nothing changes until **Save**.
+- **Edit** opens Edit mode in that card (one card at a time): drag `⠿` to reorder, drag sideways to nest a task under the one above or take it out again, or click a task and use **↑ Up**, **↓ Down**, **→ Nest** and **← Out** (with Tab and Enter, no mouse needed); click a task to rename it, add subtasks or move it to the other card (a main task takes its subtasks along), archive it with the box or remove it with the bin at the end of its row. Nothing changes until **Save**.
 
   <p><img src="../../docs/session-glance/edit-mode.png" alt="Edit mode with drag handles, archive and remove buttons, and its help open" width="380"> <img src="../../docs/session-glance/edit-drag.png" alt="Edit mode while a task is dragged: the accent line shows where it will land" width="380"></p>
 

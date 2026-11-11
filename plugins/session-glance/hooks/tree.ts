@@ -65,6 +65,36 @@ export const INDENT_CELLS = 3
 /** Where a drop would land: the list after it, and where to draw the line in the rows as they are now. */
 export type DropPlan = { list: Task[]; lineBeforeId: string | null; depth: 0 | 1 }
 
+/** A move made with a button instead of a drag: a place up or down, nested under the task above, or out again. */
+export type Step = 'up' | 'down' | 'in' | 'out'
+
+/**
+ * Moves `id` one step, as the drop a drag to that place would make (planDrop): a main task passes a whole
+ * neighbour with its subtasks, a subtask one row. Rows sort by status, so a step past a task of another
+ * status leaves the order as it was.
+ */
+export function stepTask(all: readonly Task[], id: string, step: Step, folded: readonly string[] = []): Task[] {
+  const rows = displayRows(all, folded)
+  const index = rows.findIndex(row => row.task.id === id)
+  const row = rows[index]
+  if (row === undefined) {
+    return [...all]
+  }
+  if (step === 'in' || step === 'out') {
+    return planDrop(all, id, index, step === 'in' ? INDENT_CELLS : -INDENT_CELLS, folded).list
+  }
+  if (row.depth === 1) {
+    return planDrop(all, id, step === 'up' ? index - 1 : index + 2, 0, folded).list
+  }
+  const mains = rows.map((one, at) => ({ one, at })).filter(({ one }) => one.depth === 0)
+  const own = mains.findIndex(({ at }) => at === index)
+  if (step === 'up') {
+    return own <= 0 ? [...all] : planDrop(all, id, mains[own - 1]?.at ?? 0, 0, folded).list
+  }
+
+  return own >= mains.length - 1 ? [...all] : planDrop(all, id, mains[own + 2]?.at ?? rows.length, 0, folded).list
+}
+
 /**
  * Plans dropping `dragId` at `slot`, the gap above display row `slot` (`rows.length` is
  * below the last), dragged `dx` cells sideways. Right by INDENT_CELLS nests it under the

@@ -7,7 +7,7 @@ import type { Criterion } from './status'
 import { FIELDS, formatTokens } from './status'
 import { HANDLE_CELLS } from './task-list'
 import { activeOf, displayRows, ownedBy, progress } from './tree'
-import type { Row } from './tree'
+import type { Row, Step } from './tree'
 
 /**
  * The pane and the band, drawn from plain data: `register.tsx` reads the state and passes
@@ -17,7 +17,8 @@ import type { Row } from './tree'
 /** Everything Edit mode can do, shown when the info mark is clicked. */
 const EDIT_HELP =
   'Drag ⠿ up or down to reorder. Drag it right to nest a task under the one above, left to take it out again. ' +
-  'Click a task to rename it, add subtasks or move it to the other card. The box archives a task, the bin removes it. ' +
+  'Click a task to move it with Up, Down, Nest and Out, rename it, add subtasks or move it to the other card. ' +
+  'The box archives a task, the bin removes it. ' +
   'Nothing changes until Save.'
 
 /**
@@ -97,6 +98,8 @@ export type PaneActions = {
   rename: (task: Task, value: string) => unknown
   addSubtask: (task: Task, value: string) => unknown
   move: (task: Task) => unknown
+  /** Moves the selected task one step in Edit mode: the keyboard's (and a steady hand's) way to reorder and nest. */
+  step: (task: Task, step: Step) => unknown
   archive: (task: Task) => unknown
   remove: (task: Task) => unknown
   restore: (task: Task) => unknown
@@ -408,6 +411,22 @@ export function drawPane(table: ElementTable, view: PaneView, act: PaneActions):
             .filter(row => row.task.id === selected)
             .map(row => (
               <Box flexDirection="column" gap="xs" marginTop="sm" borderStyle="round" borderColor="subtle" paddingX="sm" paddingY="sm">
+                {note('Move')}
+                {/*
+                  Buttons for what a drag does, reachable with Tab and Enter; the task stays selected for the next step.
+                  Each keeps its key whatever the task becomes, so the focus stays on it: Nest turns into Out, not into another button.
+                  A main task with subtasks cannot nest, so its sideways button is dimmed and changes nothing.
+                */}
+                <Box gap="sm" flexWrap="wrap">
+                  <Button key={`step-up-${row.task.id}`} label="↑ Up" onPress={() => act.step(row.task, 'up')} />
+                  <Button key={`step-down-${row.task.id}`} label="↓ Down" onPress={() => act.step(row.task, 'down')} />
+                  <Button
+                    key={`step-side-${row.task.id}`}
+                    label={row.depth === 1 ? '← Out' : '→ Nest'}
+                    dimColor={row.depth === 0 && row.children > 0}
+                    onPress={() => act.step(row.task, row.depth === 1 ? 'out' : 'in')}
+                  />
+                </Box>
                 {note('Rename')}
                 <Input key={`rename-${row.task.id}`} value={row.task.subject} submitLabel="Rename" onSubmit={value => act.rename(row.task, value)} />
                 {row.depth === 0 && (

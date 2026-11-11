@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { parseVerdict } from '../hooks/prompts'
-import { describeChanges, displayRows, mergeDraft, planDrop, progress, reorder } from '../hooks/tree'
+import { describeChanges, displayRows, mergeDraft, planDrop, progress, reorder, stepTask } from '../hooks/tree'
 
 const PANE = { title: 'Session', isFocused: false, bodyColumns: 40, placement: 'dock' } as const
 const USAGE = { input_tokens: 1, output_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }
@@ -220,5 +220,43 @@ test('/glance purge clears everything after confirming, and Cancel keeps it', as
   expect(await ui.find({ type: 'Text', text: 'Write the README' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'No tasks yet.' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Appears after the first answer/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('stepTask moves a task one step: past a whole neighbour, a subtask one row, nested and out again', () => {
+  const tasks = [
+    { id: 'a', subject: 'A', status: 'pending' },
+    { id: 'b', subject: 'B', status: 'pending' },
+    { id: 'b1', subject: 'B1', status: 'pending', parentId: 'b' },
+    { id: 'b2', subject: 'B2', status: 'pending', parentId: 'b' },
+    { id: 'c', subject: 'C', status: 'pending' },
+  ] as const
+  const order = (list: readonly { id: string; parentId?: string }[]) => displayRows(list as never).map(row => `${row.depth === 1 ? '-' : ''}${row.task.id}`)
+  expect(order(stepTask(tasks as never, 'c', 'up'))).toEqual(['a', 'c', 'b', '-b1', '-b2'])
+  expect(order(stepTask(tasks as never, 'a', 'down'))).toEqual(['b', '-b1', '-b2', 'a', 'c'])
+  expect(order(stepTask(tasks as never, 'a', 'up'))).toEqual(['a', 'b', '-b1', '-b2', 'c'])
+  expect(order(stepTask(tasks as never, 'c', 'in'))).toEqual(['a', 'b', '-b1', '-b2', '-c'])
+  expect(order(stepTask(tasks as never, 'b1', 'out'))).toEqual(['a', 'b', '-b2', 'b1', 'c'])
+  expect(order(stepTask(tasks as never, 'b2', 'up'))).toEqual(['a', 'b', '-b2', '-b1', 'c'])
+})
+
+test('Edit mode moves the selected task with buttons too, and keeps it selected', async ($, on) => {
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.command.run({ command: 'glance', args: 'demo' } as never)
+  const ui = await $.ui.mount({ plugin: 'session-glance', surface: 'desktop', component: 'Pane', requestId: 'session-glance', props: PANE as never })
+  const order = async () => (await ui.findAll({ type: 'Text' })).map(found => found.text).filter(text => text.trim() !== '')
+  await ui.press({ key: 'toggle-manage' })
+  await ui.press({ key: 'select-demo-5' })
+  expect((await ui.find({ type: 'Button', key: 'step-side-demo-5' }))?.props.label).toBe('→ Nest')
+  await ui.press({ key: 'step-up-demo-5' })
+  expect(await ui.find({ type: 'Button', key: 'step-up-demo-5' })).toBeDefined()
+  await ui.press({ key: 'step-side-demo-5' })
+  // The same button, under the same key, now takes it out again: the focus has somewhere to stay.
+  expect((await ui.find({ type: 'Button', key: 'step-side-demo-5' }))?.props.label).toBe('← Out')
+  await ui.press({ key: 'save-edit' })
+  const rows = await order()
+  // "Try…" moved above "Seed…", then nested under the main task now above it.
+  expect(rows.indexOf('Try it in a fresh session')).toBeLessThan(rows.indexOf('Seed fake tasks for a demo'))
+  expect(rows[rows.indexOf('Polish the terminal spacing') + 1]).toBe('0/1')
   await ui.unmount()
 })
